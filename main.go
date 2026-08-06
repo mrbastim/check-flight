@@ -68,7 +68,7 @@ func main() {
 
 	db, err := sql.Open("sqlite3", "./flights.db")
 	if err != nil {
-		log.Fatal("КРИТИЧЕСКАЯ ОШИБКА: Ошибка открытия БД: ", err)
+		log.Fatal("Ошибка открытия БД: ", err)
 	}
 	defer db.Close()
 
@@ -98,7 +98,7 @@ func initDB(db *sql.DB) {
 	);`
 	_, err := db.Exec(query)
 	if err != nil {
-		log.Fatal("КРИТИЧЕСКАЯ ОШИБКА: Ошибка создания таблицы: ", err)
+		log.Fatal("Ошибка создания таблицы: ", err)
 	}
 }
 
@@ -157,7 +157,7 @@ func processFlights(db *sql.DB, searchParam, terminalParam string) {
 				printAlert(flightCode, apiFlight.Destination.City, dbFlight, apiFlight)
 
 				// 2. Пишем технический лог в файл (в одну строку, без кракозябр цветов)
-				log.Printf("АЛЕРТ [%s]: Рейс %s (%s). Статус: '%s' -> '%s' | Гейт: '%s' -> '%s'",
+				log.Printf("[%s]: Рейс %s (%s). Статус: '%s' -> '%s' | Гейт: '%s' -> '%s'",
 					uid, flightCode, apiFlight.Destination.City,
 					dbFlight.Status, apiFlight.Status,
 					dbFlight.Gate, apiFlight.Gate)
