@@ -26,12 +26,11 @@ const (
 )
 
 type Flight struct {
-	// ID ("i_id") мы больше не храним как Primary Key, так как он нестабилен
 	Number    string `json:"flt"`
 	Status    string `json:"vip_status_rus"`
 	Terminal  string `json:"term"`
 	Gate      string `json:"gate_id"`
-	SchedTime string `json:"t_st"` // Плановое время "2026-08-06T00:05:00+03:00"
+	SchedTime string `json:"t_st"`
 
 	Company struct {
 		Code string `json:"code"`
@@ -47,7 +46,21 @@ type SvoResponse struct {
 }
 
 func main() {
-	fmt.Println(ColorCyan + ColorBold + "✈️  Запуск трекера Шереметьево (Smart ID)..." + ColorReset)
+	// 1. НАСТРОЙКА ЛОГГЕРА В ФАЙЛ
+	logFile, err := os.OpenFile("tracker.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		fmt.Println(ColorRed, "Не удалось открыть файл логов:", err, ColorReset)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+
+	// Настраиваем стандартный логгер: пишем в файл, добавляем дату и время
+	log.SetOutput(logFile)
+	log.SetFlags(log.Ldate | log.Ltime)
+
+	log.Println("=== ЗАПУСК ТРЕКЕРА ===")
+
+	fmt.Println(ColorCyan + ColorBold + "✈️  Запуск трекера Шереметьево. Логи пишутся в tracker.log" + ColorReset)
 
 	searchParam := flag.String("search", "", "Фильтр по направлению/городу")
 	terminalParam := flag.String("terminal", "", "Фильтр по терминалу вылета")
@@ -55,7 +68,7 @@ func main() {
 
 	db, err := sql.Open("sqlite3", "./flights.db")
 	if err != nil {
-		log.Fatal("Ошибка открытия БД:", err)
+		log.Fatal("КРИТИЧЕСКАЯ ОШИБКА: Ошибка открытия БД: ", err)
 	}
 	defer db.Close()
 
@@ -67,11 +80,11 @@ func main() {
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 	<-stopChan
 
+	log.Println("=== ТРЕКЕР ОСТАНОВЛЕН ===")
 	fmt.Println(ColorYellow + "\n🛑 Трекер корректно остановлен." + ColorReset)
 }
 
 func initDB(db *sql.DB) {
-	// uid - наш собственный уникальный ключ (Рейс + Время по расписанию)
 	query := `
 	CREATE TABLE IF NOT EXISTS flights (
 		uid TEXT PRIMARY KEY,
@@ -85,17 +98,12 @@ func initDB(db *sql.DB) {
 	);`
 	_, err := db.Exec(query)
 	if err != nil {
-		log.Fatal("Ошибка создания таблицы:", err)
+		log.Fatal("КРИТИЧЕСКАЯ ОШИБКА: Ошибка создания таблицы: ", err)
 	}
 }
 
 func startMonitoring(db *sql.DB, searchParam, terminalParam string) {
-	if searchParam != "" {
-		fmt.Printf("%s🔍 Поиск: %s%s\n", ColorCyan, searchParam, ColorReset)
-	}
-	if terminalParam != "" {
-		fmt.Printf("%s🧭 Терминал: %s%s\n", ColorCyan, terminalParam, ColorReset)
-	}
+	log.Printf("Параметры запуска -> Поиск: '%s', Терминал: '%s'\n", searchParam, terminalParam)
 
 	processFlights(db, searchParam, terminalParam)
 
@@ -108,32 +116,32 @@ func startMonitoring(db *sql.DB, searchParam, terminalParam string) {
 }
 
 func processFlights(db *sql.DB, searchParam, terminalParam string) {
-	fmt.Printf("%s[%s] Опрос API...%s\n", ColorReset, time.Now().Format("15:04:05"), ColorReset)
+	log.Println("Начат опрос API Шереметьево...")
 
 	flights, err := fetchSVO("departure", searchParam, terminalParam)
 	if err != nil {
-		log.Printf(ColorRed+"Ошибка API: %v"+ColorReset+"\n", err)
+		log.Printf("ОШИБКА API: %v\n", err)
 		return
 	}
+
+	log.Printf("Успешно получено рейсов: %d\n", len(flights))
 
 	savedFlights := loadFlightsFromDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
-		log.Println("Ошибка старта транзакции:", err)
+		log.Println("ОШИБКА БД (Begin Tx):", err)
 		return
 	}
 
-	changesFound := false
+	changesCount := 0
 
 	for _, apiFlight := range flights {
-		// Игнорируем кривые записи без времени расписания
 		if apiFlight.SchedTime == "" {
 			continue
 		}
 
 		flightCode := fmt.Sprintf("%s %s", apiFlight.Company.Code, apiFlight.Number)
-		// 🔑 НАШ ИДЕАЛЬНЫЙ КЛЮЧ: "SU 1424_2026-08-06T18:05:00+03:00"
 		uid := fmt.Sprintf("%s_%s", flightCode, apiFlight.SchedTime)
 
 		dbFlight, exists := savedFlights[uid]
@@ -143,25 +151,37 @@ func processFlights(db *sql.DB, searchParam, terminalParam string) {
 			gateChanged := apiFlight.Gate != "" && apiFlight.Gate != dbFlight.Gate
 
 			if statusChanged || gateChanged {
-				changesFound = true
+				changesCount++
+
+				// 1. Красиво выводим в консоль
 				printAlert(flightCode, apiFlight.Destination.City, dbFlight, apiFlight)
 
+				// 2. Пишем технический лог в файл (в одну строку, без кракозябр цветов)
+				log.Printf("АЛЕРТ [%s]: Рейс %s (%s). Статус: '%s' -> '%s' | Гейт: '%s' -> '%s'",
+					uid, flightCode, apiFlight.Destination.City,
+					dbFlight.Status, apiFlight.Status,
+					dbFlight.Gate, apiFlight.Gate)
+
 				updateQuery := `UPDATE flights SET status=?, gate=?, terminal=?, updated_at=CURRENT_TIMESTAMP WHERE uid=?`
-				_, _ = tx.Exec(updateQuery, apiFlight.Status, apiFlight.Gate, apiFlight.Terminal, uid)
+				_, err = tx.Exec(updateQuery, apiFlight.Status, apiFlight.Gate, apiFlight.Terminal, uid)
+				if err != nil {
+					log.Printf("ОШИБКА БД (Update %s): %v\n", uid, err)
+				}
 			}
 		} else {
 			insertQuery := `INSERT INTO flights (uid, flight_code, destination, sched_time, status, gate, terminal, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-			_, _ = tx.Exec(insertQuery, uid, flightCode, apiFlight.Destination.City, apiFlight.SchedTime, apiFlight.Status, apiFlight.Gate, apiFlight.Terminal)
+			_, err = tx.Exec(insertQuery, uid, flightCode, apiFlight.Destination.City, apiFlight.SchedTime, apiFlight.Status, apiFlight.Gate, apiFlight.Terminal)
+			if err != nil {
+				log.Printf("ОШИБКА БД (Insert %s): %v\n", uid, err)
+			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Println("Ошибка сохранения в БД:", err)
+		log.Println("ОШИБКА БД (Commit Tx):", err)
 	}
 
-	if !changesFound {
-		fmt.Printf("  %s└ Нет изменений%s\n", ColorReset, ColorReset)
-	}
+	log.Printf("Опрос завершен. Найдено изменений: %d\n", changesCount)
 }
 
 func printAlert(flightCode, city string, oldFlight, newFlight Flight) {
@@ -187,7 +207,6 @@ func printAlert(flightCode, city string, oldFlight, newFlight Flight) {
 		return
 	}
 
-	// Парсим время из RFC3339 в читаемый вид (напр. "06.08 18:05")
 	displayTime := newFlight.SchedTime
 	t, err := time.Parse(time.RFC3339, newFlight.SchedTime)
 	if err == nil {
@@ -195,7 +214,6 @@ func printAlert(flightCode, city string, oldFlight, newFlight Flight) {
 	}
 
 	fmt.Printf("\n%s╭────────────────────────────────────────────────────────────╮%s\n", ColorCyan, ColorReset)
-	// Добавили время вылета прямо в заголовок алерта, чтобы было понятно, какой это именно рейс!
 	fmt.Printf("%s│ ✈️  %-12s | 🕒 %-11s | 🌍 %-12s │%s\n", ColorCyan, flightCode, displayTime, trimToWidth(city, 12), ColorReset)
 	fmt.Printf("%s├──────────────┬────────────────────────┬────────────────────────┤%s\n", ColorCyan, ColorReset)
 	fmt.Printf("%s│ %-12s │ %-22s │ %-22s │%s\n", ColorCyan, "Изменение", "Было", "Стало", ColorReset)
@@ -204,11 +222,10 @@ func printAlert(flightCode, city string, oldFlight, newFlight Flight) {
 	for _, row := range rows {
 		fmt.Printf("%s│ %-12s │ %-22s │ %-22s │%s\n", ColorCyan, row[0], trimToWidth(row[1], 22), trimToWidth(row[2], 22), ColorReset)
 	}
-	fmt.Printf("%s╰──────────────┴────────────────────────┴────────────────────────╯%s\n\n", ColorCyan, ColorReset)
+	fmt.Printf("%s╰──────────────┴────────────────────────┴────────────────────────╯%s\n", ColorCyan, ColorReset)
 }
 
 func trimToWidth(value string, width int) string {
-	// Поддержка кириллицы (руны) для корректного обрезания строки
 	runes := []rune(value)
 	if len(runes) <= width {
 		return value
@@ -222,6 +239,7 @@ func trimToWidth(value string, width int) string {
 func loadFlightsFromDB(db *sql.DB) map[string]Flight {
 	rows, err := db.Query("SELECT uid, status, gate, terminal, sched_time FROM flights")
 	if err != nil {
+		log.Println("ОШИБКА БД (Select):", err)
 		return make(map[string]Flight)
 	}
 	defer rows.Close()
@@ -235,7 +253,7 @@ func loadFlightsFromDB(db *sql.DB) map[string]Flight {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return make(map[string]Flight)
+		log.Println("ОШИБКА БД (Rows Err):", err)
 	}
 	return res
 }
