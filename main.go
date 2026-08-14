@@ -64,6 +64,7 @@ func main() {
 
 	searchParam := flag.String("search", "", "Фильтр по направлению/городу")
 	terminalParam := flag.String("terminal", "", "Фильтр по терминалу вылета")
+	printParam := flag.Bool("no-printing", false, "Вывод обновлений рейсов в консоль")
 	flag.Parse()
 
 	db, err := sql.Open("sqlite3", "./flights.db")
@@ -74,7 +75,7 @@ func main() {
 
 	initDB(db)
 
-	go startMonitoring(db, *searchParam, *terminalParam)
+	go startMonitoring(db, *searchParam, *terminalParam, *printParam)
 
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
@@ -102,20 +103,20 @@ func initDB(db *sql.DB) {
 	}
 }
 
-func startMonitoring(db *sql.DB, searchParam, terminalParam string) {
+func startMonitoring(db *sql.DB, searchParam, terminalParam string, printParam bool) {
 	log.Printf("Параметры запуска -> Поиск: '%s', Терминал: '%s'\n", searchParam, terminalParam)
 
-	processFlights(db, searchParam, terminalParam)
+	processFlights(db, "", "", printParam) // для получения всех рейсов аэропорта при старте
 
 	ticker := time.NewTicker(3 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		processFlights(db, searchParam, terminalParam)
+		processFlights(db, searchParam, terminalParam, printParam)
 	}
 }
 
-func processFlights(db *sql.DB, searchParam, terminalParam string) {
+func processFlights(db *sql.DB, searchParam, terminalParam string, printParam bool) {
 	log.Println("Начат опрос API Шереметьево...")
 
 	flights, err := fetchSVO("departure", searchParam, terminalParam)
@@ -154,7 +155,9 @@ func processFlights(db *sql.DB, searchParam, terminalParam string) {
 				changesCount++
 
 				// 1. Красиво выводим в консоль
-				printAlert(flightCode, apiFlight.Destination.City, dbFlight, apiFlight)
+				if printParam {
+					printAlert(flightCode, apiFlight.Destination.City, dbFlight, apiFlight)
+				}
 
 				// 2. Пишем технический лог в файл (в одну строку, без кракозябр цветов)
 				log.Printf("[%s]: Рейс %s (%s). Статус: '%s' -> '%s' | Гейт: '%s' -> '%s'",
