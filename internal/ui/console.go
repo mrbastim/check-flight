@@ -46,7 +46,7 @@ func PrintAlert(newFlight, oldFlight model.Flight) {
 	}
 
 	fmt.Printf("\n%s╭────────────────────────────────────────────────────────────╮%s\n", ColorCyan, ColorReset)
-	fmt.Printf("%s│ ✈️  %-12s | 🕒 %-11s | 🌍 %-12s │%s\n", ColorCyan, newFlight.Code, displayTime, trimToWidth(newFlight.Destination, 12), ColorReset)
+	fmt.Printf("%s│ ✈️  %-12s | 🕒 %-11s | 🌍 %-12s │%s\n", ColorCyan, newFlight.Code, displayTime, trimToWidth(newFlight.City, 12), ColorReset)
 	fmt.Printf("%s├──────────────┬────────────────────────┬────────────────────────┤%s\n", ColorCyan, ColorReset)
 	fmt.Printf("%s│ %-12s │ %-22s │ %-22s │%s\n", ColorCyan, "Изменение", "Было", "Стало", ColorReset)
 	fmt.Printf("%s├──────────────┼────────────────────────┼────────────────────────┤%s\n", ColorCyan, ColorReset)

@@ -15,6 +15,7 @@ import (
 type client struct{}
 
 type flightAPI struct {
+	AD        string `json:"ad"` // "D" (Вылет) или "A" (Прилет)
 	Number    string `json:"flt"`
 	Status    string `json:"vip_status_rus"`
 	Terminal  string `json:"term"`
@@ -25,6 +26,12 @@ type flightAPI struct {
 		Code string `json:"code"`
 	} `json:"co"`
 
+	// mar1 - пункт отправления
+	Origin struct {
+		City string `json:"city"`
+	} `json:"mar1"`
+
+	// mar2 - пункт назначения
 	Destination struct {
 		City string `json:"city"`
 	} `json:"mar2"`
@@ -50,13 +57,14 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 	dateEnd := now.Add(48 * time.Hour).Format(time.RFC3339)
 
 	params := url.Values{}
-	params.Add("direction", query.Direction)
 	params.Add("dateStart", dateStart)
 	params.Add("dateEnd", dateEnd)
 	params.Add("perPage", "99999")
 	params.Add("page", "0")
 	params.Add("locale", "ru")
-
+	if query.Direction != "" {
+		params.Add("direction", query.Direction)
+	}
 	if query.Search != "" {
 		params.Add("search", query.Search)
 	}
@@ -90,40 +98,39 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 	}
 
 	flights := make([]model.Flight, 0, len(data.Items))
-	dirPrefix := normalizeDirection(query.Direction)
-
 	for _, item := range data.Items {
 		if item.SchedTime == "" {
 			continue
 		}
 
-		// 1. Нормализуем номер рейса: "SU 1484" для отображения, "SU1484" для ключа
-		cleanCode := strings.TrimSpace(item.Company.Code) + strings.TrimSpace(item.Number)
-		displayCode := fmt.Sprintf("%s %s", strings.TrimSpace(item.Company.Code), strings.TrimSpace(item.Number))
+		// Определяем реальное направление
+		isArrival := strings.ToUpper(item.AD) == "A"
+		direction := "dep"
+		city := item.Destination.City
 
-		// 2. Формируем пуленепробиваемый UID
-		// Формат: "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
-		uid := fmt.Sprintf("%s:%s:%s:%s", c.ID(), dirPrefix, cleanCode, item.SchedTime)
+		if isArrival {
+			direction = "arr"
+			city = item.Origin.City
+		}
+
+		// Форматируем код и UID
+		cleanCompany := strings.TrimSpace(item.Company.Code)
+		cleanNum := strings.TrimSpace(item.Number)
+		code := fmt.Sprintf("%s %s", cleanCompany, cleanNum)
+		uid := fmt.Sprintf("%s:%s:%s%s:%s", c.ID(), direction, cleanCompany, cleanNum, item.SchedTime)
 
 		flights = append(flights, model.Flight{
-			UID:         uid,
-			Code:        displayCode,
-			Destination: item.Destination.City,
-			SchedTime:   item.SchedTime,
-			Status:      item.Status,
-			Gate:        item.Gate,
-			Terminal:    item.Terminal,
+			UID:       uid,
+			Provider:  c.ID(),
+			Direction: direction,
+			Code:      code,
+			City:      city,
+			SchedTime: item.SchedTime,
+			Status:    item.Status,
+			Gate:      item.Gate,
+			Terminal:  item.Terminal,
 		})
 	}
 
 	return flights, nil
-}
-
-func normalizeDirection(dir string) string {
-	switch strings.ToLower(dir) {
-	case "arrival", "arr", "a":
-		return "arr"
-	default:
-		return "dep"
-	}
 }

@@ -34,7 +34,7 @@ func main() {
 	log.Println("=== ЗАПУСК ТРЕКЕРА ===")
 
 	providerParam := flag.String("provider", "svo", "Провайдер/аэропорт (например: svo)")
-	directionParam := flag.String("direction", "departure", "Направление рейсов (departure/arrival)")
+	directionParam := flag.String("direction", "", "Направление рейсов (departure/arrival)")
 	searchParam := flag.String("search", "", "Фильтр по направлению/городу")
 	terminalParam := flag.String("terminal", "", "Фильтр по терминалу вылета")
 	printParam := flag.Bool("no-printing", false, "Вывод обновлений рейсов в консоль")
@@ -46,6 +46,12 @@ func main() {
 	if err != nil {
 		log.Println(err)
 		fmt.Println(ui.ColorRed, err, ui.ColorReset)
+		os.Exit(1)
+	}
+
+	if *directionParam != "departure" && *directionParam != "arrival" && *directionParam != "" {
+		log.Println("Не правильно задан параметр direction")
+		fmt.Println(ui.ColorRed, "Не правильно задан параметр direction", ui.ColorReset)
 		os.Exit(1)
 	}
 
@@ -66,7 +72,7 @@ func main() {
 		Terminal:  *terminalParam,
 	}
 
-	svc := monitor.NewService(sqlRepo, p, query, *printParam, 3*time.Minute)
+	svc := monitor.NewService(sqlRepo, p, query, !*printParam, 1*time.Minute)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -79,5 +85,5 @@ func main() {
 	cancel()
 
 	log.Println("=== ТРЕКЕР ОСТАНОВЛЕН ===")
-	fmt.Println(ui.ColorYellow + "\n🛑 Трекер корректно остановлен." + ui.ColorReset)
+	fmt.Println(ui.ColorYellow + "\nТрекер корректно остановлен." + ui.ColorReset)
 }
