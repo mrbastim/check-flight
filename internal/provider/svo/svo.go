@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"check-flight/internal/model"
@@ -89,17 +90,24 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 	}
 
 	flights := make([]model.Flight, 0, len(data.Items))
+	dirPrefix := normalizeDirection(query.Direction)
+
 	for _, item := range data.Items {
 		if item.SchedTime == "" {
 			continue
 		}
 
-		code := fmt.Sprintf("%s %s", item.Company.Code, item.Number)
-		uid := fmt.Sprintf("%s_%s", code, item.SchedTime)
+		// 1. Нормализуем номер рейса: "SU 1484" для отображения, "SU1484" для ключа
+		cleanCode := strings.TrimSpace(item.Company.Code) + strings.TrimSpace(item.Number)
+		displayCode := fmt.Sprintf("%s %s", strings.TrimSpace(item.Company.Code), strings.TrimSpace(item.Number))
+
+		// 2. Формируем пуленепробиваемый UID
+		// Формат: "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
+		uid := fmt.Sprintf("%s:%s:%s:%s", c.ID(), dirPrefix, cleanCode, item.SchedTime)
 
 		flights = append(flights, model.Flight{
 			UID:         uid,
-			Code:        code,
+			Code:        displayCode,
 			Destination: item.Destination.City,
 			SchedTime:   item.SchedTime,
 			Status:      item.Status,
@@ -109,4 +117,13 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 	}
 
 	return flights, nil
+}
+
+func normalizeDirection(dir string) string {
+	switch strings.ToLower(dir) {
+	case "arrival", "arr", "a":
+		return "arr"
+	default:
+		return "dep"
+	}
 }

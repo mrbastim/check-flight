@@ -20,15 +20,23 @@ func NewRepository(db *sql.DB) *Repository {
 func (r *Repository) Init(db *sql.DB) error {
 	query := `
 	CREATE TABLE IF NOT EXISTS flights (
-		uid TEXT PRIMARY KEY,
-		flight_code TEXT,
-		destination TEXT,
-		sched_time DATETIME,
-		status TEXT,
-		gate TEXT,
-		terminal TEXT,
-		updated_at DATETIME
-	);`
+    uid          TEXT PRIMARY KEY,  -- "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
+    provider     TEXT NOT NULL,     -- "svo", "dme", "led"
+    direction    TEXT NOT NULL,     -- "dep", "arr"
+    flight_code  TEXT NOT NULL,     -- "SU 1484"
+    destination  TEXT,              -- "Уфа"
+    sched_time   DATETIME NOT NULL, -- 2026-08-06T00:05:00+03:00
+    status       TEXT,
+    gate         TEXT,
+    terminal     TEXT,
+    updated_at   DATETIME
+	);
+	
+	CREATE INDEX IF NOT EXISTS idx_flights_search 
+    	ON flights (flight_code, sched_time);
+
+	CREATE INDEX IF NOT EXISTS idx_flights_provider_dir 
+    	ON flights (provider, direction);`
 	_, err := db.Exec(query)
 	if err != nil {
 		return err
