@@ -2,26 +2,29 @@ package monitor
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"time"
 
 	"check-flight/internal/model"
 	"check-flight/internal/provider"
-	"check-flight/internal/store"
 	"check-flight/internal/ui"
 )
 
+type Repository interface {
+	LoadFlights(ctx context.Context) (map[string]model.Flight, error)
+	SaveChanges(ctx context.Context, updates []model.Flight, inserts []model.Flight) error
+}
+
 type Service struct {
-	db       *sql.DB
+	repo     Repository
 	provider provider.Provider
 	query    model.Query
 	print    bool
 	interval time.Duration
 }
 
-func NewService(db *sql.DB, p provider.Provider, query model.Query, print bool, interval time.Duration) *Service {
-	return &Service{db: db, provider: p, query: query, print: print, interval: interval}
+func NewService(repo Repository, p provider.Provider, query model.Query, print bool, interval time.Duration) *Service {
+	return &Service{repo: repo, provider: p, query: query, print: print, interval: interval}
 }
 
 func (s *Service) Start(ctx context.Context) {
@@ -53,53 +56,36 @@ func (s *Service) process(ctx context.Context) {
 
 	log.Printf("Успешно получено рейсов: %d\n", len(flights))
 
-	savedFlights, err := store.LoadFlights(s.db)
+	savedFlights, err := s.repo.LoadFlights(ctx)
 	if err != nil {
 		log.Printf("ОШИБКА БД (Load): %v\n", err)
 		return
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Println("ОШИБКА БД (Begin Tx):", err)
-		return
-	}
-
-	changesCount := 0
+	var updates, inserts []model.Flight
+	var changesCount int
 
 	for _, f := range flights {
 		dbFlight, exists := savedFlights[f.UID]
 
 		if exists {
-			statusChanged := f.Status != "" && f.Status != dbFlight.Status
-			gateChanged := f.Gate != "" && f.Gate != dbFlight.Gate
-
-			if statusChanged || gateChanged {
+			if (f.Status != "" && f.Status != dbFlight.Status) ||
+				(f.Gate != "" && f.Gate != dbFlight.Gate) ||
+				(f.Terminal != "" && f.Terminal != dbFlight.Terminal) {
 				changesCount++
-
 				if s.print {
 					ui.PrintAlert(f, dbFlight)
 				}
-
-				log.Printf("[%s]: Рейс %s (%s). Статус: '%s' -> '%s' | Гейт: '%s' -> '%s'",
-					f.UID, f.Code, f.Destination,
-					dbFlight.Status, f.Status,
-					dbFlight.Gate, f.Gate)
-
-				if err := store.UpdateFlight(tx, f); err != nil {
-					log.Printf("ОШИБКА БД (Update %s): %v\n", f.UID, err)
-				}
+				updates = append(updates, f)
 			}
 		} else {
-			if err := store.InsertFlight(tx, f); err != nil {
-				log.Printf("ОШИБКА БД (Insert %s): %v\n", f.UID, err)
-			}
+			inserts = append(inserts, f)
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		log.Println("ОШИБКА БД (Commit Tx):", err)
+	if len(updates) > 0 || len(inserts) > 0 {
+		if err := s.repo.SaveChanges(ctx, updates, inserts); err != nil {
+			log.Println("ОШИБКА БД (Save Changes):", err)
+		}
 	}
-
 	log.Printf("Опрос завершен. Найдено изменений: %d\n", changesCount)
 }

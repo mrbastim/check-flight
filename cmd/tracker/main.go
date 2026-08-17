@@ -55,7 +55,8 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := store.Init(db); err != nil {
+	sqlRepo := store.NewRepository(db)
+	if err := sqlRepo.Init(db); err != nil {
 		log.Fatal(err)
 	}
 
@@ -65,7 +66,8 @@ func main() {
 		Terminal:  *terminalParam,
 	}
 
-	svc := monitor.NewService(db, p, query, *printParam, 3*time.Minute)
+	var monitorRepo monitor.Repository
+	svc := monitor.NewService(monitorRepo, p, query, *printParam, 3*time.Minute)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
