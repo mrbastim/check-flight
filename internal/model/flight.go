@@ -10,3 +10,10 @@ type Flight struct {
 	Gate        string
 	Terminal    string
 }
+
+// Query contains common provider-agnostic filters.
+type Query struct {
+	Direction string
+	Search    string
+	Terminal  string
+}

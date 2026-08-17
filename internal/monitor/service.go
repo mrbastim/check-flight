@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"check-flight/internal/model"
 	"check-flight/internal/provider"
 	"check-flight/internal/store"
 	"check-flight/internal/ui"
@@ -14,12 +15,12 @@ import (
 type Service struct {
 	db       *sql.DB
 	provider provider.Provider
-	query    provider.Query
+	query    model.Query
 	print    bool
 	interval time.Duration
 }
 
-func NewService(db *sql.DB, p provider.Provider, query provider.Query, print bool, interval time.Duration) *Service {
+func NewService(db *sql.DB, p provider.Provider, query model.Query, print bool, interval time.Duration) *Service {
 	return &Service{db: db, provider: p, query: query, print: print, interval: interval}
 }
 

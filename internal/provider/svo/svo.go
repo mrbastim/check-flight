@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"check-flight/internal/model"
-	"check-flight/internal/provider"
 )
 
 type client struct{}
@@ -34,7 +33,7 @@ type response struct {
 	Items []flightAPI `json:"items"`
 }
 
-func New() provider.Provider {
+func New() *client {
 	return &client{}
 }
 
@@ -42,7 +41,7 @@ func (c *client) ID() string {
 	return "svo"
 }
 
-func (c *client) Fetch(ctx context.Context, query provider.Query) ([]model.Flight, error) {
+func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, error) {
 	msk := time.FixedZone("MSK", 3*60*60)
 	now := time.Now().In(msk)
 

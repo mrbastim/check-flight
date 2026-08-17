@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"check-flight/internal/model"
 	"check-flight/internal/monitor"
 	"check-flight/internal/provider"
-	"check-flight/internal/providers"
 	"check-flight/internal/store"
 	"check-flight/internal/ui"
 
@@ -42,7 +42,7 @@ func main() {
 
 	fmt.Println(ui.ColorCyan + ui.ColorBold + "✈️  Запуск трекера. Логи пишутся в tracker.log" + ui.ColorReset)
 
-	p, err := providers.New(*providerParam)
+	p, err := provider.New(*providerParam)
 	if err != nil {
 		log.Println(err)
 		fmt.Println(ui.ColorRed, err, ui.ColorReset)
@@ -59,7 +59,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	query := provider.Query{
+	query := model.Query{
 		Direction: *directionParam,
 		Search:    *searchParam,
 		Terminal:  *terminalParam,
