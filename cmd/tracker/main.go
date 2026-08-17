@@ -66,8 +66,7 @@ func main() {
 		Terminal:  *terminalParam,
 	}
 
-	var monitorRepo monitor.Repository
-	svc := monitor.NewService(monitorRepo, p, query, *printParam, 3*time.Minute)
+	svc := monitor.NewService(sqlRepo, p, query, *printParam, 3*time.Minute)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

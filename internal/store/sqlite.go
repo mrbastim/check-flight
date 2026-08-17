@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 
 	"check-flight/internal/model"
 )
@@ -12,8 +13,8 @@ type Repository struct {
 	db *sql.DB
 }
 
-func NewRepository(db *sql.DB) Repository {
-	return Repository{db: db}
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
 }
 
 func (r *Repository) Init(db *sql.DB) error {
@@ -46,6 +47,7 @@ func (r *Repository) LoadFlights(ctx context.Context) (map[string]model.Flight, 
 	for rows.Next() {
 		var f model.Flight
 		if err := rows.Scan(&f.UID, &f.Code, &f.Destination, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err != nil {
+			log.Println("Ошибка при сканировании строки:", err)
 			continue
 		}
 		res[f.UID] = f
