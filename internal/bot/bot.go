@@ -128,6 +128,28 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 			}
 		}
 		b.send(chatID, sb.String())
+	case "info":
+		if args == "" {
+			b.send(chatID, "❌ Укажите номер рейса. Пример: `/info SU 1484`")
+			return
+		}
+		code := store.NormalizeFlightCode(args)
+		flights, err := b.repo.FindUpcomingFlights(ctx, code)
+		if err != nil || len(flights) == 0 {
+			b.send(chatID, fmt.Sprintf("Рейс *%s* не найден в расписании на ближайшие дни.", code))
+			return
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("ℹ️ *Информация по рейсу* `%s`*:*\nГород: %s\n\n", code, flights[0].City))
+		for _, f := range flights {
+			t, _ := time.Parse(time.RFC3339, f.SchedTime)
+			gate := f.Gate
+			if gate == "" {
+				gate = "×"
+			}
+			sb.WriteString(fmt.Sprintf("🕒 %s | ℹ️ %s \n 🚪 %s | Терминал %s\n\n", t.Format("02.01 15:04"), f.Status, gate, f.Terminal))
+		}
+		b.send(chatID, sb.String())
 	}
 }
 
