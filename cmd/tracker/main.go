@@ -21,6 +21,13 @@ import (
 	_ "github.com/mattn/go-sqlite3" // Драйвер SQLite
 )
 
+func getEnv(key, fallback string) string {
+	if val, ok := os.LookupEnv(key); ok && val != "" {
+		return val
+	}
+	return fallback
+}
+
 func main() {
 	logFile, err := os.OpenFile("tracker.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
@@ -34,12 +41,17 @@ func main() {
 
 	log.Println("=== ЗАПУСК ТРЕКЕРА ===")
 
-	providerParam := flag.String("provider", "svo", "Провайдер/аэропорт (например: svo)")
+	envProvider := getEnv("PROVIDER", "svo")
+	envToken := getEnv("TELEGRAM_BOT_TOKEN", getEnv("TG_TOKEN", ""))
+
+	// 2. Инициализируем флаги (дефолты берутся из ENV)
+	providerParam := flag.String("provider", envProvider, "Провайдер/аэропорт (или env: PROVIDER)")
+	tgToken := flag.String("token", envToken, "Telegram Bot Token (или env: TELEGRAM_BOT_TOKEN)")
+
 	directionParam := flag.String("direction", "", "Направление рейсов (departure/arrival)")
 	searchParam := flag.String("search", "", "Фильтр по направлению/городу")
 	terminalParam := flag.String("terminal", "", "Фильтр по терминалу вылета")
-	printParam := flag.Bool("no-printing", false, "Вывод обновлений рейсов в консоль")
-	tgToken := flag.String("token", "", "Telegram Bot Token от @BotFather")
+	printParam := flag.Bool("no-printing", false, "Отключить вывод обновлений рейсов в консоль")
 
 	flag.Parse()
 
