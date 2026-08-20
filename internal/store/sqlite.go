@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	"check-flight/internal/model"
 )
@@ -18,7 +19,7 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 func (r *Repository) Init(db *sql.DB) error {
-	query := `
+	flightsQuery := `
 	CREATE TABLE IF NOT EXISTS flights (
     uid          TEXT PRIMARY KEY,  -- "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
     provider     TEXT NOT NULL,     -- "svo", "dme", "led"
@@ -37,13 +38,105 @@ func (r *Repository) Init(db *sql.DB) error {
 
 	CREATE INDEX IF NOT EXISTS idx_flights_provider_dir 
     	ON flights (provider, direction);`
-	_, err := db.Exec(query)
+	_, err := db.Exec(flightsQuery)
 	if err != nil {
 		return err
 	}
+
+	subsQuery := `
+	CREATE TABLE IF NOT EXISTS subscriptions (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	chat_id INTEGER NOT NULL,
+		flight_code TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(chat_id, flight_code)
+	);
+	CREATE INDEX IF NOT EXISTS idx_subs_flight ON subscriptions(flight_code);
+	`
+	_, err = db.Exec(subsQuery)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
+func NormalizeFlightCode(code string) string {
+	clean := strings.ToUpper(strings.TrimSpace(code))
+	if len(clean) > 3 && clean[2] != ' ' {
+		clean = clean[:2] + " " + clean[2:]
+	}
+	return clean
+}
+
+func (r *Repository) AddSubscription(ctx context.Context, chatID int64, flightCode string) error {
+	flightCode = NormalizeFlightCode(flightCode)
+	_, err := r.db.ExecContext(ctx, "INSERT OR IGNORE INTO subscriptions (chat_id, flight_code) VALUES (?, ?)", chatID, flightCode)
+	return err
+}
+
+func (r *Repository) RemoveSubscription(ctx context.Context, chatID int64, flightCode string) error {
+	flightCode = NormalizeFlightCode(flightCode)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM subscriptions WHERE chat_id=? AND flight_code=?", chatID, flightCode)
+	return err
+}
+
+func (r *Repository) GetSubscriptions(ctx context.Context, chatID int64) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT flight_code FROM subscriptions WHERE chat_id=?", chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var codes []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		codes = append(codes, code)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return codes, nil
+}
+
+func (r *Repository) GetSubscribersForFlight(ctx context.Context, flightCode string) ([]int64, error) {
+	flightCode = NormalizeFlightCode(flightCode)
+	rows, err := r.db.QueryContext(ctx, "SELECT chat_id FROM subscriptions WHERE flight_code=?", flightCode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chatIDs []int64
+	for rows.Next() {
+		var chatID int64
+		if err := rows.Scan(&chatID); err != nil {
+			return nil, err
+		}
+		chatIDs = append(chatIDs, chatID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return chatIDs, nil
+}
+
+func FindLatestFlight(db *sql.DB, rawCode string) (*model.Flight, error) {
+	code := NormalizeFlightCode(rawCode)
+	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+	          FROM flights WHERE flight_code = ? ORDER BY sched_time DESC LIMIT 1`
+
+	row := db.QueryRow(query, code)
+	var f model.Flight
+	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
 func (r *Repository) LoadFlights(ctx context.Context) (map[string]model.Flight, error) {
 	rows, err := r.db.QueryContext(ctx, "SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal FROM flights")
 	if err != nil {
