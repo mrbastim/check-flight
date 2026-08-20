@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
+	"time"
 
 	"check-flight/internal/model"
 )
@@ -45,13 +45,14 @@ func (r *Repository) Init(db *sql.DB) error {
 
 	subsQuery := `
 	CREATE TABLE IF NOT EXISTS subscriptions (
-	id           INTEGER PRIMARY KEY AUTOINCREMENT,
-	chat_id INTEGER NOT NULL,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		chat_id INTEGER NOT NULL,
 		flight_code TEXT NOT NULL,
+		active_uid TEXT NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(chat_id, flight_code)
 	);
-	CREATE INDEX IF NOT EXISTS idx_subs_flight ON subscriptions(flight_code);
+	CREATE INDEX IF NOT EXISTS idx_subs_uid ON subscriptions(active_uid);
 	`
 	_, err = db.Exec(subsQuery)
 	if err != nil {
@@ -69,9 +70,60 @@ func NormalizeFlightCode(code string) string {
 	return clean
 }
 
-func (r *Repository) AddSubscription(ctx context.Context, chatID int64, flightCode string) error {
-	flightCode = NormalizeFlightCode(flightCode)
-	_, err := r.db.ExecContext(ctx, "INSERT OR IGNORE INTO subscriptions (chat_id, flight_code) VALUES (?, ?)", chatID, flightCode)
+func (r *Repository) FindUpcomingFlights(ctx context.Context, rawCode string) ([]model.Flight, error) {
+	code := NormalizeFlightCode(rawCode)
+	msk := time.FixedZone("MSK", 3*60*60)
+	threshold := time.Now().In(msk).Add(-6 * time.Hour).Format(time.RFC3339)
+
+	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+	          FROM flights WHERE flight_code = ? AND sched_time >= ? ORDER BY sched_time ASC LIMIT 5`
+
+	rows, err := r.db.QueryContext(ctx, query, code, threshold)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var flights []model.Flight
+	for rows.Next() {
+		var f model.Flight
+		if err := rows.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
+			flights = append(flights, f)
+		}
+	}
+	return flights, nil
+}
+
+func (r *Repository) GetFlightByUID(ctx context.Context, uid string) (*model.Flight, error) {
+	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal FROM flights WHERE uid = ?`
+	row := r.db.QueryRowContext(ctx, query, uid)
+	var f model.Flight
+	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (r *Repository) GetNextFlight(ctx context.Context, code string, afterTime string) (*model.Flight, error) {
+	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+	          FROM flights WHERE flight_code = ? AND sched_time > ? ORDER BY sched_time ASC LIMIT 1`
+	row := r.db.QueryRowContext(ctx, query, code, afterTime)
+	var f model.Flight
+	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (r *Repository) SubscribeToUID(ctx context.Context, chatID int64, code, uid string) error {
+	query := `
+		INSERT INTO subscriptions (chat_id, flight_code, active_uid) 
+		VALUES (?, ?, ?) 
+		ON CONFLICT(chat_id, flight_code) 
+		DO UPDATE SET active_uid = excluded.active_uid`
+	_, err := r.db.ExecContext(ctx, query, chatID, code, uid)
 	return err
 }
 
@@ -102,9 +154,8 @@ func (r *Repository) GetSubscriptions(ctx context.Context, chatID int64) ([]stri
 	return codes, nil
 }
 
-func (r *Repository) GetSubscribersForFlight(ctx context.Context, flightCode string) ([]int64, error) {
-	flightCode = NormalizeFlightCode(flightCode)
-	rows, err := r.db.QueryContext(ctx, "SELECT chat_id FROM subscriptions WHERE flight_code=?", flightCode)
+func (r *Repository) GetSubscribersForUID(ctx context.Context, uid string) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT chat_id FROM subscriptions WHERE active_uid=?", uid)
 	if err != nil {
 		return nil, err
 	}
@@ -113,29 +164,38 @@ func (r *Repository) GetSubscribersForFlight(ctx context.Context, flightCode str
 	var chatIDs []int64
 	for rows.Next() {
 		var chatID int64
-		if err := rows.Scan(&chatID); err != nil {
-			return nil, err
+		if err := rows.Scan(&chatID); err == nil {
+			chatIDs = append(chatIDs, chatID)
 		}
-		chatIDs = append(chatIDs, chatID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return chatIDs, nil
 }
 
-func (r *Repository) FindLatestFlight(ctx context.Context, rawCode string) (*model.Flight, error) {
-	code := NormalizeFlightCode(rawCode)
-	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
-	          FROM flights WHERE flight_code = ? ORDER BY sched_time DESC LIMIT 1`
+func (r *Repository) UpdateSubscriptionUID(ctx context.Context, oldUID, newUID string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE subscriptions SET active_uid = ? WHERE active_uid = ?", newUID, oldUID)
+	return err
+}
 
-	row := r.db.QueryRowContext(ctx, query, code)
-	var f model.Flight
-	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+func (r *Repository) GetUserSubscriptionsList(ctx context.Context, chatID int64) ([]model.Flight, error) {
+	query := `
+		SELECT f.uid, f.provider, f.direction, f.flight_code, f.city, f.sched_time, f.status, f.gate, f.terminal 
+		FROM subscriptions s
+		JOIN flights f ON s.active_uid = f.uid
+		WHERE s.chat_id = ?`
+	rows, err := r.db.QueryContext(ctx, query, chatID)
 	if err != nil {
 		return nil, err
 	}
-	return &f, nil
+	defer rows.Close()
+
+	var res []model.Flight
+	for rows.Next() {
+		var f model.Flight
+		if err := rows.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
+			res = append(res, f)
+		}
+	}
+	return res, nil
 }
 func (r *Repository) LoadFlights(ctx context.Context) (map[string]model.Flight, error) {
 	rows, err := r.db.QueryContext(ctx, "SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal FROM flights")
@@ -147,14 +207,9 @@ func (r *Repository) LoadFlights(ctx context.Context) (map[string]model.Flight, 
 	res := make(map[string]model.Flight)
 	for rows.Next() {
 		var f model.Flight
-		if err := rows.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err != nil {
-			log.Println("Ошибка при сканировании строки:", err)
-			continue
+		if err := rows.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
+			res[f.UID] = f
 		}
-		res[f.UID] = f
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return res, nil
 }

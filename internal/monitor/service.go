@@ -80,7 +80,11 @@ func (s *Service) process(ctx context.Context) {
 				}
 				updates = append(updates, f)
 				if s.bot != nil {
-					s.bot.SendAlert(f, dbFlight)
+					s.bot.SendAlert(ctx, f, dbFlight)
+
+					if bot.IsTerminalStatus(f.Status) && !bot.IsTerminalStatus(dbFlight.Status) {
+						s.bot.HandleAutoShift(ctx, dbFlight)
+					}
 				}
 			}
 		} else {
