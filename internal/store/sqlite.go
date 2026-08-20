@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"check-flight/internal/model"
 )
@@ -126,17 +127,41 @@ func (r *Repository) GetSubscribersForFlight(ctx context.Context, flightCode str
 
 func (r *Repository) FindLatestFlight(ctx context.Context, rawCode string) (*model.Flight, error) {
 	code := NormalizeFlightCode(rawCode)
-	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
-	          FROM flights WHERE flight_code = ? ORDER BY sched_time DESC LIMIT 1`
 
-	row := r.db.QueryRowContext(ctx, query, code)
+	msk := time.FixedZone("MSK", 3*60*60) // Время по Москве (аэропорты МСК)
+	// Берем с запасом 3 часа назад, чтобы поймать рейсы, у которых прямо сейчас идет посадка или задержка
+	threshold := time.Now().In(msk).Add(-3 * time.Hour).Format(time.RFC3339)
+
+	queryUpcoming := `
+		SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+		FROM flights 
+		WHERE flight_code = ? AND sched_time >= ? 
+		ORDER BY sched_time ASC 
+		LIMIT 1`
+
+	row := r.db.QueryRowContext(ctx, queryUpcoming, code, threshold)
 	var f model.Flight
 	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+	if err == nil {
+		return &f, nil
+	}
+
+	queryFallback := `
+		SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+		FROM flights 
+		WHERE flight_code = ? 
+		ORDER BY sched_time DESC 
+		LIMIT 1`
+
+	row = r.db.QueryRowContext(ctx, queryFallback, code)
+	err = row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
 	if err != nil {
 		return nil, err
 	}
+
 	return &f, nil
 }
+
 func (r *Repository) LoadFlights(ctx context.Context) (map[string]model.Flight, error) {
 	rows, err := r.db.QueryContext(ctx, "SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal FROM flights")
 	if err != nil {
