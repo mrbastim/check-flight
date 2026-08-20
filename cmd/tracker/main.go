@@ -79,20 +79,20 @@ func main() {
 	}
 	defer db.Close()
 
+	sqlRepo := store.NewRepository(db)
+	if err := sqlRepo.Init(db); err != nil {
+		log.Fatal(err)
+	}
+
 	var tgBot *bot.Bot
 	if *tgToken != "" {
-		tgBot, err = bot.New(*tgToken, db)
+		tgBot, err = bot.New(*tgToken, sqlRepo)
 		if err != nil {
 			log.Fatalf("Ошибка создания бота: %v", err)
 		}
 		go tgBot.Start(ctx)
 	} else {
 		fmt.Println("⚠️ Токен Telegram не передан. Бот работает в режиме только консоли.")
-	}
-
-	sqlRepo := store.NewRepository(db)
-	if err := sqlRepo.Init(db); err != nil {
-		log.Fatal(err)
 	}
 
 	query := model.Query{
