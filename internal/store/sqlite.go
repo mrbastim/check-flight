@@ -124,12 +124,12 @@ func (r *Repository) GetSubscribersForFlight(ctx context.Context, flightCode str
 	return chatIDs, nil
 }
 
-func FindLatestFlight(db *sql.DB, rawCode string) (*model.Flight, error) {
+func (r *Repository) FindLatestFlight(ctx context.Context, rawCode string) (*model.Flight, error) {
 	code := NormalizeFlightCode(rawCode)
 	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
 	          FROM flights WHERE flight_code = ? ORDER BY sched_time DESC LIMIT 1`
 
-	row := db.QueryRow(query, code)
+	row := r.db.QueryRowContext(ctx, query, code)
 	var f model.Flight
 	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
 	if err != nil {
