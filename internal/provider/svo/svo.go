@@ -49,6 +49,10 @@ func (c *client) ID() string {
 	return "svo"
 }
 
+func (c *client) Name() string {
+	return "Шереметьево"
+}
+
 func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, error) {
 	msk := time.FixedZone("MSK", 3*60*60)
 	now := time.Now().In(msk)

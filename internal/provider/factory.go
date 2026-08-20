@@ -15,3 +15,12 @@ func New(id string) (Provider, error) {
 		return nil, fmt.Errorf("неизвестный провайдер: %s", id)
 	}
 }
+
+func ParseProviderNameByID(id string) string {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "svo":
+		return "Шереметьево"
+	default:
+		return id
+	}
+}

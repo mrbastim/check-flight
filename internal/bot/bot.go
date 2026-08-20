@@ -10,6 +10,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"check-flight/internal/model"
+	"check-flight/internal/provider"
 	"check-flight/internal/store"
 )
 
@@ -111,9 +112,20 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		}
 		var sb strings.Builder
 		sb.WriteString("📋 *Ваши подписки:*\n\n")
+		byProvider := make(map[string][]model.Flight)
 		for _, f := range subs {
-			t, _ := time.Parse(time.RFC3339, f.SchedTime)
-			sb.WriteString(fmt.Sprintf("✈️ *%s* ➔ %s\n🕒 %s | ℹ️ %s\n\n", f.Code, f.City, t.Format("02.01 15:04"), f.Status))
+			byProvider[f.Provider] = append(byProvider[f.Provider], f)
+		}
+		for providerID, flights := range byProvider {
+			provider := provider.ParseProviderNameByID(providerID)
+			if provider == "" {
+				provider = "Другой"
+			}
+			sb.WriteString(fmt.Sprintf("*%s:*\n", provider))
+			for _, f := range flights {
+				t, _ := time.Parse(time.RFC3339, f.SchedTime)
+				sb.WriteString(fmt.Sprintf("✈️ `%s` ➔ %s\n🕒 %s | ℹ️ %s\n\n", f.Code, f.City, t.Format("02.01 15:04"), f.Status))
+			}
 		}
 		b.send(chatID, sb.String())
 	}
