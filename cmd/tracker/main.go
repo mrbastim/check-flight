@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"check-flight/internal/bot"
 	"check-flight/internal/model"
 	"check-flight/internal/monitor"
 	"check-flight/internal/provider"
@@ -38,6 +39,8 @@ func main() {
 	searchParam := flag.String("search", "", "Фильтр по направлению/городу")
 	terminalParam := flag.String("terminal", "", "Фильтр по терминалу вылета")
 	printParam := flag.Bool("no-printing", false, "Вывод обновлений рейсов в консоль")
+	tgToken := flag.String("token", "", "Telegram Bot Token от @BotFather")
+
 	flag.Parse()
 
 	fmt.Println(ui.ColorCyan + ui.ColorBold + "✈️  Запуск трекера. Логи пишутся в tracker.log" + ui.ColorReset)
@@ -55,11 +58,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	db, err := sql.Open("sqlite3", "./flights.db")
 	if err != nil {
 		log.Fatal("Ошибка открытия БД: ", err)
 	}
 	defer db.Close()
+
+	var tgBot *bot.Bot
+	if *tgToken != "" {
+		tgBot, err = bot.New(*tgToken, db)
+		if err != nil {
+			log.Fatalf("Ошибка создания бота: %v", err)
+		}
+		go tgBot.Start(ctx)
+	} else {
+		fmt.Println("⚠️ Токен Telegram не передан. Бот работает в режиме только консоли.")
+	}
 
 	sqlRepo := store.NewRepository(db)
 	if err := sqlRepo.Init(db); err != nil {
@@ -72,10 +89,7 @@ func main() {
 		Terminal:  *terminalParam,
 	}
 
-	svc := monitor.NewService(sqlRepo, p, query, !*printParam, 1*time.Minute)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	svc := monitor.NewService(sqlRepo, p, query, tgBot, !*printParam, 1*time.Minute)
 
 	go svc.Start(ctx)
 

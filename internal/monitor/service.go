@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"check-flight/internal/bot"
 	"check-flight/internal/model"
 	"check-flight/internal/provider"
 	"check-flight/internal/ui"
@@ -19,12 +20,13 @@ type Service struct {
 	repo     Repository
 	provider provider.Provider
 	query    model.Query
+	bot      *bot.Bot
 	print    bool
 	interval time.Duration
 }
 
-func NewService(repo Repository, p provider.Provider, query model.Query, print bool, interval time.Duration) *Service {
-	return &Service{repo: repo, provider: p, query: query, print: print, interval: interval}
+func NewService(repo Repository, p provider.Provider, query model.Query, bot *bot.Bot, print bool, interval time.Duration) *Service {
+	return &Service{repo: repo, provider: p, query: query, bot: bot, print: print, interval: interval}
 }
 
 func (s *Service) Start(ctx context.Context) {
@@ -77,6 +79,9 @@ func (s *Service) process(ctx context.Context) {
 					ui.PrintAlert(f, dbFlight)
 				}
 				updates = append(updates, f)
+				if s.bot != nil {
+					s.bot.SendAlert(f, dbFlight)
+				}
 			}
 		} else {
 			inserts = append(inserts, f)
