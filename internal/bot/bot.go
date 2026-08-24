@@ -144,21 +144,31 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 			return
 		}
 		var sb strings.Builder
+		var flightURL string
 		sb.WriteString(fmt.Sprintf("ℹ️ *Информация по рейсу* `%s`*:*\nГород: %s\n\n", code, flights[0].City))
 		for _, f := range flights {
 			t, _ := time.Parse(time.RFC3339, f.SchedTime)
+			if flightProvider, ok := b.providers.Get(f.Provider); ok {
+				flightURL = flightProvider.GetFlightURL(f.InternalID, f.Direction)
+			}
 			if f.Direction == "arr" {
-				sb.WriteString(fmt.Sprintf("🛬 *Прилет:* %s | Терминал %s | ℹ️ %s\n", t.Format("02.01 15:04"), f.Terminal, f.Status))
+				sb.WriteString(fmt.Sprintf("🛬 *Прилет:* %s | Терминал %s\n", t.Format("02.01 15:04"), f.Terminal))
+				if f.Status != "" {
+					sb.WriteString(fmt.Sprintf("ℹ️ *Статус:* %s\n", f.Status))
+				}
 				if f.BaggageBelt != "" {
 					sb.WriteString(fmt.Sprintf("🧳 *Багажная лента:* %s\n", f.BaggageBelt))
 				}
 			} else {
-				sb.WriteString(fmt.Sprintf("🛫 *Вылет:* %s | Терминал %s | ℹ️ %s\n", t.Format("02.01 15:04"), f.Terminal, f.Status))
+				sb.WriteString(fmt.Sprintf("🛫 *Вылет:* %s | Терминал %s\n", t.Format("02.01 15:04"), f.Terminal))
+				if f.Status != "" {
+					sb.WriteString(fmt.Sprintf("ℹ️ *Статус:* %s\n", f.Status))
+				}
 				if f.Gate != "" {
 					sb.WriteString(fmt.Sprintf("🚪 *Выход на посадку:* %s\n", f.Gate))
 				}
 			}
-
+			sb.WriteString(fmt.Sprintf("🔗 [Подробнее](%s)\n\n", flightURL))
 		}
 		b.send(chatID, sb.String())
 
@@ -181,7 +191,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		for _, f := range flights {
 			t, _ := time.Parse(time.RFC3339, f.SchedTime)
 
-			// Формат: "🛫 SVO ➔ Уфа | SU1424 | 16:30"
+			// Формат: "🛫 SVO ➔ Уфа | SU1424 | 24.08 16:30"
 			icon := "🛫"
 			fromTo := fmt.Sprintf("%s ➔ %s", strings.ToUpper(f.Provider), f.City)
 			if f.Direction == "arr" {
@@ -220,8 +230,8 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		_ = b.repo.SubscribeToUID(ctx, cb.Message.Chat.ID, flight.Code, uid)
 
 		t, _ := time.Parse(time.RFC3339, flight.SchedTime)
-		reply := fmt.Sprintf("✅ *Подписка оформлена!*\n\n📍 Направление: *%s*\n🕒 Вылет: *%s*\nℹ️ Статус: *%s*\n\n🔔 Вы будете получать пуш-уведомления.",
-			flight.City, t.Format("02.01 15:04"), flight.Status)
+		reply := fmt.Sprintf("✅ *Подписка оформлена!*\n\n📍 Направление: *%s*\n🕒 Вылет: *%s*\nℹ️ Статус: *%s*\n\n🔔 Вы будете получать уведомления в данном чате.",
+			flight.City, t.Format("15:04 02.01"), flight.Status)
 
 		editMsg := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, reply)
 		editMsg.ParseMode = "Markdown"
@@ -247,7 +257,7 @@ func (b *Bot) SendAlert(ctx context.Context, newF, oldF model.Flight) {
 		if oldG == "" {
 			oldG = "Нет"
 		}
-		changes = append(changes, fmt.Sprintf("🚪 *Гейт:* %s ➔ *%s*", oldG, newF.Gate))
+		changes = append(changes, fmt.Sprintf("🚪 *Выход на посадку:* %s ➔ *%s*", oldG, newF.Gate))
 	}
 	if newF.Status != oldF.Status && newF.Status != "" {
 		oldS := oldF.Status

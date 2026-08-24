@@ -43,6 +43,11 @@ type response struct {
 	Items []flightAPI `json:"items"`
 }
 
+const (
+	timetable_bitrixURL = "https://www.svo.aero/bitrix/timetable/"
+	timetable_ruURL     = "https://www.svo.aero/ru/timetable/"
+)
+
 func New() *client {
 	return &client{}
 }
@@ -57,9 +62,9 @@ func (c *client) Name() string {
 
 func (c *client) GetFlightURL(internalID string, direction string) string {
 	if direction == "arr" {
-		return fmt.Sprintf("https://www.svo.aero/ru/timetable/arrival/flight/%s/info", internalID)
+		return fmt.Sprintf("%sarrival/flight/%s/info", timetable_ruURL, internalID)
 	}
-	return fmt.Sprintf("https://www.svo.aero/ru/timetable/departure/flight/%s/info", internalID)
+	return fmt.Sprintf("%sdeparture/flight/%s/info", timetable_ruURL, internalID)
 }
 
 func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, error) {
@@ -85,7 +90,7 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 		params.Add("terminal", query.Terminal)
 	}
 
-	fullURL := "https://www.svo.aero/bitrix/timetable/?" + params.Encode()
+	fullURL := timetable_bitrixURL + "?" + params.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return nil, err

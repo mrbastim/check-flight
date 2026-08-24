@@ -24,7 +24,7 @@ func PrintAlert(newFlight, oldFlight model.Flight) {
 		if oldG == "" {
 			oldG = "Нет"
 		}
-		rows = append(rows, []string{"Гейт", oldG, newFlight.Gate})
+		rows = append(rows, []string{"Выход на посадку", oldG, newFlight.Gate})
 	}
 
 	if newFlight.Status != oldFlight.Status && newFlight.Status != "" {
