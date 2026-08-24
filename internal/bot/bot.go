@@ -58,14 +58,16 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 	switch msg.Command() {
 	case "start", "help":
 		text := "✈️ *Бот отслеживания авиарейсов*\n\n" +
-			"• `/track SU 1484` — подписаться на рейс\n" +
-			"• `/untrack SU 1484` — отписаться\n" +
-			"• `/list` — мои подписки"
+			"• `/track SU 1234` — подписаться на рейс\n" +
+			"• `/untrack SU 1234` — отписаться\n" +
+			"• `/list` — мои подписки\n" +
+			"• `/info SU 1234` — информация по рейсу\n" +
+			"Для поиска рейсов по городу вылета/прилета используйте команду `/search`\n"
 		b.send(chatID, text)
 
 	case "track":
 		if args == "" {
-			b.send(chatID, "❌ Укажите номер рейса. Пример: `/track SU 1484`")
+			b.send(chatID, "❌ Укажите номер рейса. Пример: `/track SU 1234`")
 			return
 		}
 		code := store.NormalizeFlightCode(args)
@@ -99,7 +101,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 
 	case "untrack":
 		if args == "" {
-			b.send(chatID, "❌ Укажите номер рейса. Пример: `/untrack SU 1484`")
+			b.send(chatID, "❌ Укажите номер рейса. Пример: `/untrack SU 1234`")
 			return
 		}
 		_ = b.repo.RemoveSubscription(ctx, chatID, args)
@@ -129,9 +131,10 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 			}
 		}
 		b.send(chatID, sb.String())
+
 	case "info":
 		if args == "" {
-			b.send(chatID, "❌ Укажите номер рейса. Пример: `/info SU 1484`")
+			b.send(chatID, "❌ Укажите номер рейса. Пример: `/info SU 1234`")
 			return
 		}
 		code := store.NormalizeFlightCode(args)
@@ -144,13 +147,62 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		sb.WriteString(fmt.Sprintf("ℹ️ *Информация по рейсу* `%s`*:*\nГород: %s\n\n", code, flights[0].City))
 		for _, f := range flights {
 			t, _ := time.Parse(time.RFC3339, f.SchedTime)
-			gate := f.Gate
-			if gate == "" {
-				gate = "×"
+			if f.Direction == "arr" {
+				sb.WriteString(fmt.Sprintf("🛬 *Прилет:* %s | Терминал %s | ℹ️ %s\n", t.Format("02.01 15:04"), f.Terminal, f.Status))
+				if f.BaggageBelt != "" {
+					sb.WriteString(fmt.Sprintf("🧳 *Багажная лента:* %s\n", f.BaggageBelt))
+				}
+			} else {
+				sb.WriteString(fmt.Sprintf("🛫 *Вылет:* %s | Терминал %s | ℹ️ %s\n", t.Format("02.01 15:04"), f.Terminal, f.Status))
+				if f.Gate != "" {
+					sb.WriteString(fmt.Sprintf("🚪 *Выход на посадку:* %s\n", f.Gate))
+				}
 			}
-			sb.WriteString(fmt.Sprintf("🕒 %s | ℹ️ %s \n 🚪 %s | Терминал %s\n\n", t.Format("02.01 15:04"), f.Status, gate, f.Terminal))
+
 		}
 		b.send(chatID, sb.String())
+
+	case "search":
+		if args == "" {
+			b.send(chatID, "❌ Укажите город вылета или прилета. Пример: `/search Москва`")
+			return
+		}
+		flights, err := b.repo.GetFlightsByCity(ctx, args)
+		if err != nil {
+			b.send(chatID, fmt.Sprintf("❌ Ошибка при поиске рейсов по городу *%s*", args))
+			log.Printf("Ошибка поиска рейсов по городу %s: %v", args, err)
+			return
+		}
+		if len(flights) == 0 {
+			b.send(chatID, fmt.Sprintf("Рейсы по городу *%s* не найдены в расписании на ближайшие дни.", args))
+			return
+		}
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, f := range flights {
+			t, _ := time.Parse(time.RFC3339, f.SchedTime)
+
+			// Формат: "🛫 SVO ➔ Уфа | SU1424 | 16:30"
+			icon := "🛫"
+			fromTo := fmt.Sprintf("%s ➔ %s", strings.ToUpper(f.Provider), f.City)
+			if f.Direction == "arr" {
+				icon = "🛬"
+				fromTo = fmt.Sprintf("%s ➔ %s", f.City, strings.ToUpper(f.Provider))
+			}
+
+			btnText := fmt.Sprintf("%s %s | %s | %s", icon, fromTo, f.Code, t.Format("02.01 15:04"))
+			cbData := "sub:" + f.UID
+
+			btn := tgbotapi.NewInlineKeyboardButtonData(btnText, cbData)
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+		}
+
+		msgOut := tgbotapi.NewMessage(msg.Chat.ID, "🔎 *Найденные рейсы:*\nВыберите нужный для подписки:")
+		msgOut.ParseMode = "Markdown"
+		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+		b.api.Send(msgOut)
+
+	default:
+		b.send(chatID, "❌ Неизвестная команда. Используйте `/help` для списка доступных команд.")
 	}
 }
 
@@ -180,7 +232,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	}
 }
 
-// SendAlert рассылает уведомления (ТЕПЕРЬ ПОИСК ИДЕТ ПО UID)
+// SendAlert рассылает уведомления
 func (b *Bot) SendAlert(ctx context.Context, newF, oldF model.Flight) {
 	chats, _ := b.repo.GetSubscribersForUID(ctx, newF.UID)
 	if len(chats) == 0 {

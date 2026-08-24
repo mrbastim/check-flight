@@ -20,42 +20,42 @@ func NewRepository(db *sql.DB) *Repository {
 
 func (r *Repository) Init(db *sql.DB) error {
 	flightsQuery := `
-	CREATE TABLE IF NOT EXISTS flights (
-    uid          TEXT PRIMARY KEY,  -- "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
-	internal_id  TEXT,              -- "1234567"
-    provider     TEXT NOT NULL,     -- "svo", "dme", "led"
-    direction    TEXT NOT NULL,     -- "dep", "arr"
-    flight_code  TEXT NOT NULL,     -- "SU 1484"
-    city         TEXT,              -- "Уфа"
-    sched_time   DATETIME NOT NULL, -- 2026-08-06T00:05:00+03:00
-    status       TEXT,
-    gate         TEXT,
-    terminal     TEXT,
-    baggage_belt TEXT,
-    updated_at   DATETIME
-	);
+		CREATE TABLE IF NOT EXISTS flights (
+		uid          TEXT PRIMARY KEY,  -- "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
+		internal_id  TEXT,              -- "1234567"
+		provider     TEXT NOT NULL,     -- "svo", "dme", "led"
+		direction    TEXT NOT NULL,     -- "dep", "arr"
+		flight_code  TEXT NOT NULL,     -- "SU 1484"
+		city         TEXT,              -- "Уфа"
+		sched_time   DATETIME NOT NULL, -- 2026-08-06T00:05:00+03:00
+		status       TEXT,
+		gate         TEXT,
+		terminal     TEXT,
+		baggage_belt TEXT,
+		updated_at   DATETIME
+		);
 
-	CREATE INDEX IF NOT EXISTS idx_flights_search 
-    	ON flights (flight_code, sched_time);
+		CREATE INDEX IF NOT EXISTS idx_flights_search 
+			ON flights (flight_code, sched_time);
 
-	CREATE INDEX IF NOT EXISTS idx_flights_provider_dir 
-    	ON flights (provider, direction);`
+		CREATE INDEX IF NOT EXISTS idx_flights_provider_dir 
+			ON flights (provider, direction);`
 	_, err := db.Exec(flightsQuery)
 	if err != nil {
 		return err
 	}
 
 	subsQuery := `
-	CREATE TABLE IF NOT EXISTS subscriptions (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		chat_id INTEGER NOT NULL,
-		flight_code TEXT NOT NULL,
-		active_uid TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(chat_id, flight_code)
-	);
-	CREATE INDEX IF NOT EXISTS idx_subs_uid ON subscriptions(active_uid);
-	`
+		CREATE TABLE IF NOT EXISTS subscriptions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			chat_id INTEGER NOT NULL,
+			flight_code TEXT NOT NULL,
+			active_uid TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(chat_id, flight_code)
+		);
+		CREATE INDEX IF NOT EXISTS idx_subs_uid ON subscriptions(active_uid);
+		`
 	_, err = db.Exec(subsQuery)
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (r *Repository) FindUpcomingFlights(ctx context.Context, rawCode string) ([
 	threshold := time.Now().In(msk).Add(-6 * time.Hour).Format(time.RFC3339)
 
 	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal 
-	          FROM flights WHERE flight_code = ? AND sched_time >= ? ORDER BY sched_time ASC LIMIT 5`
+				FROM flights WHERE flight_code = ? AND sched_time >= ? ORDER BY sched_time ASC LIMIT 5`
 
 	rows, err := r.db.QueryContext(ctx, query, code, threshold)
 	if err != nil {
@@ -107,12 +107,32 @@ func (r *Repository) GetFlightByUID(ctx context.Context, uid string) (*model.Fli
 	return &f, nil
 }
 
+func (r *Repository) GetFlightsByCity(ctx context.Context, city string) ([]model.Flight, error) {
+	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+				FROM flights WHERE city = ? ORDER BY sched_time ASC`
+	rows, err := r.db.QueryContext(ctx, query, city)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var flights []model.Flight
+	for rows.Next() {
+		var f model.Flight
+		if err := rows.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
+			flights = append(flights, f)
+		}
+	}
+	return flights, nil
+}
+
 func (r *Repository) GetNextFlight(ctx context.Context, code string, afterTime string) (*model.Flight, error) {
 	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal 
-	          FROM flights WHERE flight_code = ? AND sched_time > ? ORDER BY sched_time ASC LIMIT 1`
+				FROM flights WHERE flight_code = ? AND sched_time > ? ORDER BY sched_time ASC LIMIT 1`
 	row := r.db.QueryRowContext(ctx, query, code, afterTime)
 	var f model.Flight
-	err := row.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+	err := row.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate,
+		&f.Terminal)
 	if err != nil {
 		return nil, err
 	}
@@ -121,10 +141,10 @@ func (r *Repository) GetNextFlight(ctx context.Context, code string, afterTime s
 
 func (r *Repository) SubscribeToUID(ctx context.Context, chatID int64, code, uid string) error {
 	query := `
-		INSERT INTO subscriptions (chat_id, flight_code, active_uid) 
-		VALUES (?, ?, ?) 
-		ON CONFLICT(chat_id, flight_code) 
-		DO UPDATE SET active_uid = excluded.active_uid`
+			INSERT INTO subscriptions (chat_id, flight_code, active_uid) 
+			VALUES (?, ?, ?) 
+			ON CONFLICT(chat_id, flight_code) 
+			DO UPDATE SET active_uid = excluded.active_uid`
 	_, err := r.db.ExecContext(ctx, query, chatID, code, uid)
 	return err
 }
@@ -180,10 +200,10 @@ func (r *Repository) UpdateSubscriptionUID(ctx context.Context, oldUID, newUID s
 
 func (r *Repository) GetUserSubscriptionsList(ctx context.Context, chatID int64) ([]model.Flight, error) {
 	query := `
-		SELECT f.uid, f.internal_id, f.provider, f.direction, f.flight_code, f.city, f.sched_time, f.status, f.gate, f.terminal 
-		FROM subscriptions s
-		JOIN flights f ON s.active_uid = f.uid
-		WHERE s.chat_id = ?`
+			SELECT f.uid, f.internal_id, f.provider, f.direction, f.flight_code, f.city, f.sched_time, f.status, f.gate, f.terminal 
+			FROM subscriptions s
+			JOIN flights f ON s.active_uid = f.uid
+			WHERE s.chat_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, chatID)
 	if err != nil {
 		return nil, err
