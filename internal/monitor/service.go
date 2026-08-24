@@ -73,7 +73,8 @@ func (s *Service) process(ctx context.Context) {
 		if exists {
 			if (f.Status != "" && f.Status != dbFlight.Status) ||
 				(f.Gate != "" && f.Gate != dbFlight.Gate) ||
-				(f.Terminal != "" && f.Terminal != dbFlight.Terminal) {
+				(f.Terminal != "" && f.Terminal != dbFlight.Terminal) ||
+				(f.BaggageBelt != "" && f.BaggageBelt != dbFlight.BaggageBelt) {
 				changesCount++
 				if s.print {
 					ui.PrintAlert(f, dbFlight)

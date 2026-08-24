@@ -77,7 +77,7 @@ func (r *Repository) FindUpcomingFlights(ctx context.Context, rawCode string) ([
 	msk := time.FixedZone("MSK", 3*60*60)
 	threshold := time.Now().In(msk).Add(-6 * time.Hour).Format(time.RFC3339)
 
-	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal 
 	          FROM flights WHERE flight_code = ? AND sched_time >= ? ORDER BY sched_time ASC LIMIT 5`
 
 	rows, err := r.db.QueryContext(ctx, query, code, threshold)
@@ -89,7 +89,7 @@ func (r *Repository) FindUpcomingFlights(ctx context.Context, rawCode string) ([
 	var flights []model.Flight
 	for rows.Next() {
 		var f model.Flight
-		if err := rows.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
+		if err := rows.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
 			flights = append(flights, f)
 		}
 	}
@@ -97,10 +97,10 @@ func (r *Repository) FindUpcomingFlights(ctx context.Context, rawCode string) ([
 }
 
 func (r *Repository) GetFlightByUID(ctx context.Context, uid string) (*model.Flight, error) {
-	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal FROM flights WHERE uid = ?`
+	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal FROM flights WHERE uid = ?`
 	row := r.db.QueryRowContext(ctx, query, uid)
 	var f model.Flight
-	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+	err := row.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
 	if err != nil {
 		return nil, err
 	}
@@ -108,11 +108,11 @@ func (r *Repository) GetFlightByUID(ctx context.Context, uid string) (*model.Fli
 }
 
 func (r *Repository) GetNextFlight(ctx context.Context, code string, afterTime string) (*model.Flight, error) {
-	query := `SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal 
+	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal 
 	          FROM flights WHERE flight_code = ? AND sched_time > ? ORDER BY sched_time ASC LIMIT 1`
 	row := r.db.QueryRowContext(ctx, query, code, afterTime)
 	var f model.Flight
-	err := row.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
+	err := row.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func (r *Repository) UpdateSubscriptionUID(ctx context.Context, oldUID, newUID s
 
 func (r *Repository) GetUserSubscriptionsList(ctx context.Context, chatID int64) ([]model.Flight, error) {
 	query := `
-		SELECT f.uid, f.provider, f.direction, f.flight_code, f.city, f.sched_time, f.status, f.gate, f.terminal 
+		SELECT f.uid, f.internal_id, f.provider, f.direction, f.flight_code, f.city, f.sched_time, f.status, f.gate, f.terminal 
 		FROM subscriptions s
 		JOIN flights f ON s.active_uid = f.uid
 		WHERE s.chat_id = ?`
@@ -193,7 +193,7 @@ func (r *Repository) GetUserSubscriptionsList(ctx context.Context, chatID int64)
 	var res []model.Flight
 	for rows.Next() {
 		var f model.Flight
-		if err := rows.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
+		if err := rows.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
 			res = append(res, f)
 		}
 	}
@@ -272,8 +272,8 @@ func (r *Repository) UpdateFlight(ctx context.Context, tx *sql.Tx, f model.Fligh
 }
 
 func (r *Repository) InsertFlight(ctx context.Context, tx *sql.Tx, f model.Flight) error {
-	insertQuery := `INSERT INTO flights (provider, uid, direction, flight_code, city, sched_time, status, gate, terminal, baggage_belt, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-	_, err := tx.ExecContext(ctx, insertQuery, f.Provider, f.UID, f.Direction, f.Code, f.City, f.SchedTime, f.Status, f.Gate, f.Terminal, f.BaggageBelt)
+	insertQuery := `INSERT INTO flights (provider, uid, internal_id, direction, flight_code, city, sched_time, status, gate, terminal, baggage_belt, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+	_, err := tx.ExecContext(ctx, insertQuery, f.Provider, f.UID, f.InternalID, f.Direction, f.Code, f.City, f.SchedTime, f.Status, f.Gate, f.Terminal, f.BaggageBelt)
 	if err != nil {
 		return fmt.Errorf("tx insert error: %w", err)
 	}

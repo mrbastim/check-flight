@@ -63,6 +63,7 @@ func main() {
 		fmt.Println(ui.ColorRed, err, ui.ColorReset)
 		os.Exit(1)
 	}
+	providers := provider.NewRegistry(p)
 
 	if *directionParam != "departure" && *directionParam != "arrival" && *directionParam != "" {
 		log.Println("Не правильно задан параметр direction")
@@ -86,7 +87,7 @@ func main() {
 
 	var tgBot *bot.Bot
 	if *tgToken != "" {
-		tgBot, err = bot.New(*tgToken, sqlRepo)
+		tgBot, err = bot.New(*tgToken, sqlRepo, providers)
 		if err != nil {
 			log.Fatalf("Ошибка создания бота: %v", err)
 		}

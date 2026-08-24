@@ -15,17 +15,18 @@ import (
 )
 
 type Bot struct {
-	api  *tgbotapi.BotAPI
-	repo *store.Repository
+	api       *tgbotapi.BotAPI
+	repo      *store.Repository
+	providers *provider.Registry
 }
 
-func New(token string, repo *store.Repository) (*Bot, error) {
+func New(token string, repo *store.Repository, providers *provider.Registry) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("telegram auth error: %w", err)
 	}
 	log.Printf("Авторизован Telegram-бот: @%s", api.Self.UserName)
-	return &Bot{api: api, repo: repo}, nil
+	return &Bot{api: api, repo: repo, providers: providers}, nil
 }
 
 func (b *Bot) Start(ctx context.Context) {
@@ -203,12 +204,27 @@ func (b *Bot) SendAlert(ctx context.Context, newF, oldF model.Flight) {
 		}
 		changes = append(changes, fmt.Sprintf("ℹ️ *Статус:* %s ➔ *%s*", oldS, newF.Status))
 	}
+	if newF.BaggageBelt != oldF.BaggageBelt && newF.BaggageBelt != "" && newF.Direction == "arr" {
+		oldB := oldF.BaggageBelt
+		if oldB == "" {
+			oldB = "Нет"
+		}
+		changes = append(changes, fmt.Sprintf("🧳 *Багаж:* %s ➔ *%s*", oldB, newF.BaggageBelt))
+	}
 	if len(changes) == 0 {
 		return
 	}
 
+	var flightURL string
+	if flightProvider, ok := b.providers.Get(newF.Provider); ok {
+		flightURL = flightProvider.GetFlightURL(newF.InternalID, newF.Direction)
+	}
+
 	msgText := fmt.Sprintf("🔔 *ОБНОВЛЕНИЕ РЕЙСА %s*\n🌍 %s | 🕒 %s\n\n%s",
 		newF.Code, newF.City, t.Format("02.01 15:04"), strings.Join(changes, "\n"))
+	if flightURL != "" {
+		msgText += fmt.Sprintf("\n\n🔗 [Подробнее](%s)", flightURL)
+	}
 
 	for _, chatID := range chats {
 		b.send(chatID, msgText)
