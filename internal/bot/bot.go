@@ -20,6 +20,14 @@ type Bot struct {
 	providers *provider.Registry
 }
 
+const (
+	subscribeCommandPattern = "/track %s"
+	subscribeCommandURL     = "https://t.me/%s?text=/track %s"
+
+	unsubscribeCommandPattern = "/untrack %s"
+	unsubscribeCommandURL     = "https://t.me/%s?text=/untrack %s"
+)
+
 func New(token string, repo *store.Repository, providers *provider.Registry) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -127,7 +135,13 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 			sb.WriteString(fmt.Sprintf("*%s:*\n", provider))
 			for _, f := range flights {
 				t, _ := time.Parse(time.RFC3339, f.SchedTime)
-				sb.WriteString(fmt.Sprintf("✈️ `%s` ➔ %s\n🕒 %s | ℹ️ %s\n\n", f.Code, f.City, t.Format("02.01 15:04"), f.Status))
+				icon := "🛫"
+				fromTo := fmt.Sprintf("%s ➔ %s", strings.ToUpper(f.Provider), f.City)
+				if f.Direction == "arr" {
+					icon = "🛬"
+					fromTo = fmt.Sprintf("%s ➔ %s", f.City, strings.ToUpper(f.Provider))
+				}
+				sb.WriteString(fmt.Sprintf("%s %s | %s | %s", icon, fromTo, f.Code, t.Format("02.01 15:04")))
 			}
 		}
 		b.send(chatID, sb.String())
@@ -164,11 +178,12 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 				if f.Status != "" {
 					sb.WriteString(fmt.Sprintf("ℹ️ *Статус:* %s\n", f.Status))
 				}
-				if f.Gate != "" {
+				if f.Gate != "" && !InFlightStatus(f.Status) {
 					sb.WriteString(fmt.Sprintf("🚪 *Выход на посадку:* %s\n", f.Gate))
 				}
 			}
-			sb.WriteString(fmt.Sprintf("🔗 [Подробнее](%s)\n\n", flightURL))
+			sb.WriteString(fmt.Sprintf("🔗 [Подробнее](%s)\n", flightURL))
+			sb.WriteString(fmt.Sprintf("🔗 [Подписаться](%s)\n\n", GetSubscribeURL(b.api.Self.UserName, code)))
 		}
 		b.send(chatID, sb.String())
 
@@ -282,10 +297,11 @@ func (b *Bot) SendAlert(ctx context.Context, newF, oldF model.Flight) {
 		flightURL = flightProvider.GetFlightURL(newF.InternalID, newF.Direction)
 	}
 
-	msgText := fmt.Sprintf("🔔 *ОБНОВЛЕНИЕ РЕЙСА %s*\n🌍 %s | 🕒 %s\n\n%s",
+	msgText := fmt.Sprintf("🔔 *Обновление рейса %s*\n🌍 %s | 🕒 %s\n\n%s",
 		newF.Code, newF.City, t.Format("02.01 15:04"), strings.Join(changes, "\n"))
 	if flightURL != "" {
-		msgText += fmt.Sprintf("\n\n🔗 [Подробнее](%s)", flightURL)
+		msgText += fmt.Sprintf("\n\n🔗 [Подробнее](%s)\n", flightURL) +
+			fmt.Sprintf("🔗 [Отписаться](%s)", GetUnsubscribeURL(b.api.Self.UserName, newF.Code))
 	}
 
 	for _, chatID := range chats {
@@ -309,7 +325,8 @@ func (b *Bot) HandleAutoShift(ctx context.Context, f model.Flight) {
 
 	tNext, _ := time.Parse(time.RFC3339, nextFlight.SchedTime)
 	msgText := fmt.Sprintf("🏁 Рейс *%s* завершен!\n\n♻️ Ваша подписка автоматически переключена на следующий рейс:\n📅 *%s* | ℹ️ %s",
-		f.Code, tNext.Format("02.01 15:04"), nextFlight.Status)
+		f.Code, tNext.Format("02.01 15:04"), nextFlight.Status) +
+		fmt.Sprintf("\n🔗 [Отписаться](%s)", GetUnsubscribeURL(b.api.Self.UserName, f.Code))
 
 	for _, chatID := range chats {
 		b.send(chatID, msgText)
@@ -325,7 +342,22 @@ func (b *Bot) send(chatID int64, text string) {
 // IsTerminalStatus проверяет, завершен ли рейс
 func IsTerminalStatus(status string) bool {
 	s := strings.ToLower(status)
+	s = strings.ReplaceAll(s, "ё", "е")
 	return strings.Contains(s, "прибыл") || strings.Contains(s, "посадку") ||
 		strings.Contains(s, "вылетел") || strings.Contains(s, "отправлен") ||
 		strings.Contains(s, "отменен")
+}
+
+func InFlightStatus(status string) bool {
+	s := strings.ToLower(status)
+	s = strings.ReplaceAll(s, "ё", "е")
+	return strings.Contains(s, "в полете")
+}
+
+func GetSubscribeURL(botUsername, flightCode string) string {
+	return strings.ReplaceAll(fmt.Sprintf(subscribeCommandURL, botUsername, flightCode), " ", "%20")
+}
+
+func GetUnsubscribeURL(botUsername, flightCode string) string {
+	return strings.ReplaceAll(fmt.Sprintf(unsubscribeCommandURL, botUsername, flightCode), " ", "%20")
 }

@@ -15,14 +15,15 @@ import (
 type client struct{}
 
 type flightAPI struct {
-	AD        string `json:"ad"` // "D" (Вылет) или "A" (Прилет)
-	Number    string `json:"flt"`
-	IID       string `json:"i_id"`
-	Status    string `json:"vip_status_rus"`
-	Terminal  string `json:"term"`
-	Gate      string `json:"gate_id"`
-	Baggage   string `json:"bbel_id"`
-	SchedTime string `json:"t_st"`
+	AD          string `json:"ad"` // "D" (Вылет) или "A" (Прилет)
+	Number      string `json:"flt"`
+	IID         string `json:"i_id"`
+	Status      string `json:"vip_status_rus"`
+	Terminal    string `json:"term"`
+	Gate        string `json:"gate_id"`
+	Baggage     string `json:"bbel_id"`
+	SchedTime   string `json:"t_st"`
+	CheckInDesk string `json:"chin_id"`
 
 	Company struct {
 		Code string `json:"code"`
@@ -153,6 +154,7 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 			Gate:        item.Gate,
 			Terminal:    item.Terminal,
 			BaggageBelt: bbel,
+			CheckInDesk: item.CheckInDesk,
 		})
 	}
 

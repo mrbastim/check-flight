@@ -13,6 +13,7 @@ type Flight struct {
 	Gate        string
 	Terminal    string
 	BaggageBelt string
+	CheckInDesk string
 }
 
 // Query contains common provider-agnostic filters.
