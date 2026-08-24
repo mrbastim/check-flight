@@ -22,6 +22,7 @@ func (r *Repository) Init(db *sql.DB) error {
 	flightsQuery := `
 	CREATE TABLE IF NOT EXISTS flights (
     uid          TEXT PRIMARY KEY,  -- "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
+	internal_id  TEXT,              -- "1234567"
     provider     TEXT NOT NULL,     -- "svo", "dme", "led"
     direction    TEXT NOT NULL,     -- "dep", "arr"
     flight_code  TEXT NOT NULL,     -- "SU 1484"
@@ -30,6 +31,7 @@ func (r *Repository) Init(db *sql.DB) error {
     status       TEXT,
     gate         TEXT,
     terminal     TEXT,
+    baggage_belt TEXT,
     updated_at   DATETIME
 	);
 
@@ -199,7 +201,7 @@ func (r *Repository) GetUserSubscriptionsList(ctx context.Context, chatID int64)
 }
 
 func (r *Repository) LoadFlights(ctx context.Context) (map[string]model.Flight, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT uid, provider, direction, flight_code, city, sched_time, status, gate, terminal FROM flights")
+	rows, err := r.db.QueryContext(ctx, "SELECT uid, provider, internal_id, direction, flight_code, city, sched_time, status, gate, terminal, baggage_belt FROM flights")
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +210,7 @@ func (r *Repository) LoadFlights(ctx context.Context) (map[string]model.Flight, 
 	res := make(map[string]model.Flight)
 	for rows.Next() {
 		var f model.Flight
-		if err := rows.Scan(&f.UID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal); err == nil {
+		if err := rows.Scan(&f.UID, &f.Provider, &f.InternalID, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal, &f.BaggageBelt); err == nil {
 			res[f.UID] = f
 		}
 	}
@@ -222,7 +224,7 @@ func (r *Repository) SaveChanges(ctx context.Context, updates []model.Flight, in
 	}
 
 	if len(updates) > 0 {
-		updateStmt, err := tx.PrepareContext(ctx, `UPDATE flights SET status=?, gate=?, terminal=?, updated_at=CURRENT_TIMESTAMP WHERE uid=?`)
+		updateStmt, err := tx.PrepareContext(ctx, `UPDATE flights SET status=?, gate=?, terminal=?, baggage_belt=?, updated_at=CURRENT_TIMESTAMP WHERE uid=?`)
 		if err != nil {
 			tx.Rollback()
 			return err
@@ -230,7 +232,7 @@ func (r *Repository) SaveChanges(ctx context.Context, updates []model.Flight, in
 		defer updateStmt.Close()
 
 		for _, f := range updates {
-			if _, err := updateStmt.ExecContext(ctx, f.Status, f.Gate, f.Terminal, f.UID); err != nil {
+			if _, err := updateStmt.ExecContext(ctx, f.Status, f.Gate, f.Terminal, f.BaggageBelt, f.UID); err != nil {
 				tx.Rollback()
 				return err
 			}
@@ -238,7 +240,7 @@ func (r *Repository) SaveChanges(ctx context.Context, updates []model.Flight, in
 	}
 
 	if len(inserts) > 0 {
-		insertStmt, err := tx.PrepareContext(ctx, `INSERT INTO flights (uid, provider, direction, flight_code, city, sched_time, status, gate, terminal, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
+		insertStmt, err := tx.PrepareContext(ctx, `INSERT INTO flights (uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal, baggage_belt, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
 		if err != nil {
 			tx.Rollback()
 			return err
@@ -246,7 +248,7 @@ func (r *Repository) SaveChanges(ctx context.Context, updates []model.Flight, in
 		defer insertStmt.Close()
 
 		for _, f := range inserts {
-			if _, err := insertStmt.ExecContext(ctx, f.UID, f.Provider, f.Direction, f.Code, f.City, f.SchedTime, f.Status, f.Gate, f.Terminal); err != nil {
+			if _, err := insertStmt.ExecContext(ctx, f.UID, f.InternalID, f.Provider, f.Direction, f.Code, f.City, f.SchedTime, f.Status, f.Gate, f.Terminal, f.BaggageBelt); err != nil {
 				tx.Rollback()
 				return err
 			}
@@ -261,8 +263,8 @@ func (r *Repository) SaveChanges(ctx context.Context, updates []model.Flight, in
 }
 
 func (r *Repository) UpdateFlight(ctx context.Context, tx *sql.Tx, f model.Flight) error {
-	updateQuery := `UPDATE flights SET status=?, gate=?, terminal=?, updated_at=CURRENT_TIMESTAMP WHERE uid=?`
-	_, err := tx.ExecContext(ctx, updateQuery, f.Status, f.Gate, f.Terminal, f.UID)
+	updateQuery := `UPDATE flights SET status=?, gate=?, terminal=?, baggage_belt=?, updated_at=CURRENT_TIMESTAMP WHERE uid=?`
+	_, err := tx.ExecContext(ctx, updateQuery, f.Status, f.Gate, f.Terminal, f.BaggageBelt, f.UID)
 	if err != nil {
 		return fmt.Errorf("tx update error: %w", err)
 	}
@@ -270,8 +272,8 @@ func (r *Repository) UpdateFlight(ctx context.Context, tx *sql.Tx, f model.Fligh
 }
 
 func (r *Repository) InsertFlight(ctx context.Context, tx *sql.Tx, f model.Flight) error {
-	insertQuery := `INSERT INTO flights (provider, uid, direction, flight_code, city, sched_time, status, gate, terminal, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-	_, err := tx.ExecContext(ctx, insertQuery, f.Provider, f.UID, f.Direction, f.Code, f.City, f.SchedTime, f.Status, f.Gate, f.Terminal)
+	insertQuery := `INSERT INTO flights (provider, uid, direction, flight_code, city, sched_time, status, gate, terminal, baggage_belt, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+	_, err := tx.ExecContext(ctx, insertQuery, f.Provider, f.UID, f.Direction, f.Code, f.City, f.SchedTime, f.Status, f.Gate, f.Terminal, f.BaggageBelt)
 	if err != nil {
 		return fmt.Errorf("tx insert error: %w", err)
 	}

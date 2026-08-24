@@ -17,9 +17,11 @@ type client struct{}
 type flightAPI struct {
 	AD        string `json:"ad"` // "D" (Вылет) или "A" (Прилет)
 	Number    string `json:"flt"`
+	IID       string `json:"i_id"`
 	Status    string `json:"vip_status_rus"`
 	Terminal  string `json:"term"`
 	Gate      string `json:"gate_id"`
+	Baggage   string `json:"bbel_id"`
 	SchedTime string `json:"t_st"`
 
 	Company struct {
@@ -51,6 +53,13 @@ func (c *client) ID() string {
 
 func (c *client) Name() string {
 	return "Шереметьево"
+}
+
+func (c *client) GetFlightURL(internalID string, direction string) string {
+	if direction == "arr" {
+		return fmt.Sprintf("https://www.svo.aero/ru/timetable/arrival/flight/%s/info", internalID)
+	}
+	return fmt.Sprintf("https://www.svo.aero/ru/timetable/departure/flight/%s/info", internalID)
 }
 
 func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, error) {
@@ -107,6 +116,8 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 			continue
 		}
 
+		internalID := item.IID
+
 		// Определяем реальное направление
 		isArrival := strings.ToUpper(item.AD) == "A"
 		direction := "dep"
@@ -117,6 +128,8 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 			city = item.Origin.City
 		}
 
+		bbel := item.Baggage
+
 		// Форматируем код и UID
 		cleanCompany := strings.TrimSpace(item.Company.Code)
 		cleanNum := strings.TrimSpace(item.Number)
@@ -124,15 +137,17 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 		uid := fmt.Sprintf("%s:%s:%s%s:%s", c.ID(), direction, cleanCompany, cleanNum, item.SchedTime)
 
 		flights = append(flights, model.Flight{
-			UID:       uid,
-			Provider:  c.ID(),
-			Direction: direction,
-			Code:      code,
-			City:      city,
-			SchedTime: item.SchedTime,
-			Status:    item.Status,
-			Gate:      item.Gate,
-			Terminal:  item.Terminal,
+			UID:         uid,
+			InternalID:  internalID,
+			Provider:    c.ID(),
+			Direction:   direction,
+			Code:        code,
+			City:        city,
+			SchedTime:   item.SchedTime,
+			Status:      item.Status,
+			Gate:        item.Gate,
+			Terminal:    item.Terminal,
+			BaggageBelt: bbel,
 		})
 	}
 

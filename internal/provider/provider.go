@@ -10,4 +10,5 @@ import (
 type Provider interface {
 	ID() string
 	Fetch(ctx context.Context, query model.Query) ([]model.Flight, error)
+	GetFlightURL(internalID string, direction string) string
 }
