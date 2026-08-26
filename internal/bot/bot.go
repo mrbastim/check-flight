@@ -26,6 +26,15 @@ const (
 
 	unsubscribeCommandPattern = "/untrack %s"
 	unsubscribeCommandURL     = "https://t.me/%s?text=/untrack %s"
+
+	listCommandURL = "https://t.me/%s?text=/list"
+	helpCommandURL = "https://t.me/%s?text=/help"
+
+	infoCommandPattern = "/info %s"
+	infoCommandURL     = "https://t.me/%s?text=/info %s"
+
+	searchCommandPattern = "/search %s"
+	searchCommandURL     = "https://t.me/%s?text=/search %s"
 )
 
 func New(token string, repo *store.Repository, providers *provider.Registry) (*Bot, error) {
@@ -65,19 +74,18 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 
 	switch msg.Command() {
 	case "start", "help":
-		text := "✈️ *Бот отслеживания авиарейсов*\n\n" +
-			"• `/track SU 1234` — подписаться на рейс\n" +
-			"• `/untrack SU 1234` — отписаться\n" +
-			"• `/list` — мои подписки\n" +
-			"• `/info SU 1234` — информация по рейсу\n" +
-			"Для поиска рейсов по городу вылета/прилета используйте команду `/search`\n"
+		text := fmt.Sprintf("✈️ *Бот отслеживания авиарейсов*\n\n"+
+			"• [/track SU 1234](%s) — подписаться на рейс\n"+
+			"• [/untrack SU 1234](%s) — отписаться\n"+
+			"• [/list](%s) — мои подписки\n"+
+			"• [/info SU 1234](%s) — информация по рейсу\n"+
+			"Для поиска рейсов по городу вылета/прилета используйте команду [/search](%s)\n",
+			GetSubscribeURL(b.api.Self.UserName, ""),
+			GetUnsubscribeURL(b.api.Self.UserName, ""),
+			listCommandURL, fmt.Sprintf(infoCommandURL, b.api.Self.UserName, ""), fmt.Sprintf(searchCommandURL, b.api.Self.UserName, ""))
 		b.send(chatID, text)
-
+		return
 	case "track":
-		if args == "" {
-			b.send(chatID, "❌ Укажите номер рейса. Пример: `/track SU 1234`")
-			return
-		}
 		code := store.NormalizeFlightCode(args)
 
 		flights, err := b.repo.FindUpcomingFlights(ctx, code)
@@ -109,7 +117,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 
 	case "untrack":
 		if args == "" {
-			b.send(chatID, "❌ Укажите номер рейса. Пример: `/untrack SU 1234`")
+			b.send(chatID, fmt.Sprintf("❌ Укажите номер рейса. Пример: [/untrack SU 1234](%s)", GetUnsubscribeURL(b.api.Self.UserName, "")))
 			return
 		}
 		_ = b.repo.RemoveSubscription(ctx, chatID, args)
@@ -148,7 +156,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 
 	case "info":
 		if args == "" {
-			b.send(chatID, "❌ Укажите номер рейса. Пример: `/info SU 1234`")
+			b.send(chatID, fmt.Sprintf("❌ Укажите номер рейса. Пример: [/info SU 1234](%s)", fmt.Sprintf(infoCommandURL, b.api.Self.UserName, "")))
 			return
 		}
 		code := store.NormalizeFlightCode(args)
@@ -189,7 +197,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 
 	case "search":
 		if args == "" {
-			b.send(chatID, "❌ Укажите город вылета или прилета. Пример: `/search Москва`")
+			b.send(chatID, fmt.Sprintf("❌ Укажите город вылета или прилета. Пример: [/search Москва](%s)", fmt.Sprintf(searchCommandURL, b.api.Self.UserName, "")))
 			return
 		}
 		flights, err := b.repo.GetFlightsByCity(ctx, args)
@@ -227,7 +235,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		b.api.Send(msgOut)
 
 	default:
-		b.send(chatID, "❌ Неизвестная команда. Используйте `/help` для списка доступных команд.")
+		b.send(chatID, fmt.Sprintf("❌ Неизвестная команда. Используйте [/help](%s) для списка доступных команд.", fmt.Sprintf(helpCommandURL, b.api.Self.UserName)))
 	}
 }
 
