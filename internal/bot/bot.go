@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -18,6 +20,9 @@ type Bot struct {
 	api       *tgbotapi.BotAPI
 	repo      *store.Repository
 	providers *provider.Registry
+	searchMu  sync.RWMutex
+	searches  map[string]string
+	searchSeq uint64
 }
 
 const (
@@ -43,7 +48,7 @@ func New(token string, repo *store.Repository, providers *provider.Registry) (*B
 		return nil, fmt.Errorf("telegram auth error: %w", err)
 	}
 	log.Printf("Авторизован Telegram-бот: @%s", api.Self.UserName)
-	return &Bot{api: api, repo: repo, providers: providers}, nil
+	return &Bot{api: api, repo: repo, providers: providers, searches: make(map[string]string)}, nil
 }
 
 func (b *Bot) Start(ctx context.Context) {
@@ -203,42 +208,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 			b.send(chatID, fmt.Sprintf("❌ Укажите город вылета или прилета. Пример: [/search Москва](%s)", fmt.Sprintf(searchCommandURL, b.api.Self.UserName, "")))
 			return
 		}
-		flights, err := b.repo.GetFlightsByCity(ctx, args)
-		if err != nil {
-			b.send(chatID, fmt.Sprintf("❌ Ошибка при поиске рейсов по городу *%s*", args))
-			log.Printf("Ошибка поиска рейсов по городу %s: %v", args, err)
-			return
-		}
-		if len(flights) == 0 {
-			b.send(chatID, fmt.Sprintf("Рейсы по городу *%s* не найдены в расписании на ближайшие дни.", args))
-			return
-		}
-		var rows [][]tgbotapi.InlineKeyboardButton
-		for _, f := range flights {
-			t, _ := time.Parse(time.RFC3339, f.SchedTime)
-
-			// Формат: "🛫 SVO ➔ Уфа | SU1424 | 24.08 16:30"
-			icon := "🛫"
-			fromTo := fmt.Sprintf("%s ➔ %s", strings.ToUpper(f.Provider), f.City)
-			if f.Direction == "arr" {
-				icon = "🛬"
-				fromTo = fmt.Sprintf("%s ➔ %s", f.City, strings.ToUpper(f.Provider))
-			}
-
-			btnText := fmt.Sprintf("%s %s | %s | %s", icon, fromTo, f.Code, t.Format("02.01 15:04"))
-			cbData := "sub:" + f.UID
-
-			btn := tgbotapi.NewInlineKeyboardButtonData(btnText, cbData)
-			rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
-		}
-
-		msgOut := tgbotapi.NewMessage(msg.Chat.ID, "🔎 *Найденные рейсы:*\nВыберите нужный для подписки:")
-		msgOut.ParseMode = "Markdown"
-		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-		_, err = b.api.Send(msgOut)
-		if err != nil {
-			log.Printf("Ошибка при отправке сообщения: %v", err)
-		}
+		b.sendFlightSearch(ctx, chatID, args)
 
 	default:
 		b.send(chatID, fmt.Sprintf("❌ Неизвестная команда. Используйте [/help](%s) для списка доступных команд.", fmt.Sprintf(helpCommandURL, b.api.Self.UserName)))
@@ -247,6 +217,30 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 
 // Обработка нажатия на кнопку (выбор даты)
 func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	if strings.HasPrefix(cb.Data, "fl:") || strings.HasPrefix(cb.Data, "pg:") {
+		parts := strings.Split(cb.Data, ":")
+		if len(parts) != 4 {
+			return
+		}
+		page, err := strconv.Atoi(parts[3])
+		if err != nil {
+			return
+		}
+		text, markup, err := b.flightSearchPage(ctx, parts[1], parts[2], page)
+		if err != nil || text == "" {
+			b.answerCallback(cb.ID, "Результаты поиска устарели")
+			return
+		}
+		editMsg := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, text)
+		editMsg.ParseMode = "Markdown"
+		editMsg.ReplyMarkup = &markup
+		if _, err := b.api.Send(editMsg); err != nil {
+			log.Printf("Ошибка при обновлении результатов поиска: %v", err)
+		}
+		b.answerCallback(cb.ID, "")
+		return
+	}
+
 	if strings.HasPrefix(cb.Data, "sub:") {
 		uid := strings.TrimPrefix(cb.Data, "sub:")
 
@@ -285,6 +279,61 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		if err != nil {
 			log.Printf("Ошибка при отправке колбека: %v", err)
 		}
+	}
+	if strings.HasPrefix(cb.Data, "info:") {
+		uid := strings.TrimPrefix(cb.Data, "info:")
+
+		flight, err := b.repo.GetFlightByUID(ctx, uid)
+		if err != nil {
+			log.Printf("Ошибка при получении рейса по UID %s: %v", uid, err)
+			_, err := b.api.Request(tgbotapi.NewCallback(cb.ID, "Рейс не найден!"))
+			if err != nil {
+				log.Printf("Ошибка при отправке колбека: %v", err)
+			}
+			return
+		}
+
+		var sb strings.Builder
+		var flightURL string
+		sb.WriteString(fmt.Sprintf("ℹ️ *Информация по рейсу* `%s`*:*\nГород: %s\n\n", flight.Code, flight.City))
+		t, _ := time.Parse(time.RFC3339, flight.SchedTime)
+		if flightProvider, ok := b.providers.Get(flight.Provider); ok {
+			flightURL = flightProvider.GetFlightURL(flight.InternalID, flight.Direction)
+		}
+		if flight.Direction == "arr" {
+			sb.WriteString(fmt.Sprintf("🛬 *Прилет:* %s | Терминал %s\n", t.Format("02.01 15:04"), flight.Terminal))
+			if flight.Status != "" {
+				sb.WriteString(fmt.Sprintf("ℹ️ *Статус:* %s\n", flight.Status))
+			}
+			if flight.BaggageBelt != "" {
+				sb.WriteString(fmt.Sprintf("🧳 *Багажная лента:* %s\n", flight.BaggageBelt))
+			}
+		} else {
+			sb.WriteString(fmt.Sprintf("🛫 *Вылет:* %s | Терминал %s\n", t.Format("02.01 15:04"), flight.Terminal))
+			if flight.Status != "" {
+				sb.WriteString(fmt.Sprintf("ℹ️ *Статус:* %s\n", flight.Status))
+			}
+			if flight.Gate != "" && !InFlightStatus(flight.Status) {
+				sb.WriteString(fmt.Sprintf("🚪 *Выход на посадку:* %s\n", flight.Gate))
+			}
+		}
+		sb.WriteString(fmt.Sprintf("🔗 [Подробнее](%s)\n", flightURL))
+		sb.WriteString(fmt.Sprintf("🔗 [Подписаться](%s)\n\n", GetSubscribeURL(b.api.Self.UserName, flight.Code)))
+
+		reply := sb.String()
+		editMsg := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, reply)
+		editMsg.ParseMode = "Markdown"
+		_, err = b.api.Send(editMsg)
+		if err != nil {
+			log.Printf("Ошибка при отправке сообщения: %v", err)
+		}
+	}
+}
+
+func (b *Bot) answerCallback(callbackID, text string) {
+	_, err := b.api.Request(tgbotapi.NewCallback(callbackID, text))
+	if err != nil {
+		log.Printf("Ошибка при отправке колбека: %v", err)
 	}
 }
 
