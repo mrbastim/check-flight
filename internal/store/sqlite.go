@@ -86,7 +86,7 @@ func NormalizeFlightCode(code string) string {
 
 func (r *Repository) GetOldSubscriptions(ctx context.Context) ([]OldSub, error) {
 	msk := time.FixedZone("MSK", 3*60*60)
-	threshold := time.Now().In(msk).Add(-30 * 24 * time.Hour).Format(time.RFC3339)
+	threshold := time.Now().In(msk).Add(-30 * 24 * time.Hour).Format("2006-01-02 15:04:05")
 	query := `SELECT chat_id, flight_code, active_uid, created_at FROM subscriptions WHERE created_at < ?`
 	rows, err := r.db.QueryContext(ctx, query, threshold)
 	if err != nil {
@@ -108,7 +108,7 @@ func (r *Repository) GetOldSubscriptions(ctx context.Context) ([]OldSub, error) 
 }
 
 func (r *Repository) SwitchSubscriptionUID(ctx context.Context, chatID int64, flightCode, newUID string) error {
-	query := `UPDATE subscriptions SET active_uid = ? created_at = CURRENT_TIMESTAMP WHERE chat_id = ? AND flight_code = ?`
+	query := `UPDATE subscriptions SET active_uid = ?, created_at = CURRENT_TIMESTAMP WHERE chat_id = ? AND flight_code = ?`
 	_, err := r.db.ExecContext(ctx, query, newUID, chatID, flightCode)
 	return err
 }
@@ -199,7 +199,8 @@ func (r *Repository) SubscribeToUID(ctx context.Context, chatID int64, code, uid
 			INSERT INTO subscriptions (chat_id, flight_code, active_uid) 
 			VALUES (?, ?, ?) 
 			ON CONFLICT(chat_id, flight_code) 
-			DO UPDATE SET active_uid = excluded.active_uid`
+			DO UPDATE SET active_uid = excluded.active_uid, 
+			created_at = CURRENT_TIMESTAMP`
 	_, err := r.db.ExecContext(ctx, query, chatID, code, uid)
 	return err
 }

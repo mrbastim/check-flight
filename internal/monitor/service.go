@@ -84,6 +84,22 @@ func (s *Service) process(ctx context.Context) {
 		dbFlight, exists := savedFlights[f.UID]
 
 		if exists {
+			if f.Status == "" {
+				f.Status = dbFlight.Status
+			}
+			if f.Gate == "" {
+				f.Gate = dbFlight.Gate
+			}
+			if f.Terminal == "" {
+				f.Terminal = dbFlight.Terminal
+			}
+			if f.BaggageBelt == "" {
+				f.BaggageBelt = dbFlight.BaggageBelt
+			}
+			if f.CheckInDesk == "" {
+				f.CheckInDesk = dbFlight.CheckInDesk
+			}
+
 			if (f.Status != "" && f.Status != dbFlight.Status) ||
 				(f.Gate != "" && f.Gate != dbFlight.Gate) ||
 				(f.Terminal != "" && f.Terminal != dbFlight.Terminal) ||
@@ -120,7 +136,11 @@ func (s *Service) runWorker(ctx context.Context) {
 			return
 		case <-ticker.C:
 			oldSubs, err := s.repo.GetOldSubscriptions(ctx)
-			if err == nil && len(oldSubs) > 0 {
+			if err != nil {
+				log.Printf("Ошибка при получении старых подписок: %v", err)
+				continue
+			}
+			if len(oldSubs) > 0 {
 				for _, sub := range oldSubs {
 					flight, err := s.repo.GetFlightByUID(ctx, sub.ActiveUID)
 					if err != nil {
@@ -144,8 +164,11 @@ func (s *Service) runWorker(ctx context.Context) {
 					}
 				}
 			}
+
 			if deleted, err := s.repo.DeleteOldFlights(ctx); err == nil && deleted > 0 {
 				log.Printf("Воркер очистки: удалено %d старых рейсов", deleted)
+			} else if err != nil {
+				log.Printf("Воркер очистки: ошибка при удалении старых рейсов: %v", err)
 			}
 		}
 	}

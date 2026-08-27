@@ -113,7 +113,10 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		msgOut := tgbotapi.NewMessage(chatID, fmt.Sprintf("📅 Выберите дату вылета для рейса *%s*:", code))
 		msgOut.ParseMode = "Markdown"
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-		b.api.Send(msgOut)
+		_, err = b.api.Send(msgOut)
+		if err != nil {
+			log.Printf("Ошибка при отправке сообщения: %v", err)
+		}
 
 	case "untrack":
 		if args == "" {
@@ -232,7 +235,10 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		msgOut := tgbotapi.NewMessage(msg.Chat.ID, "🔎 *Найденные рейсы:*\nВыберите нужный для подписки:")
 		msgOut.ParseMode = "Markdown"
 		msgOut.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-		b.api.Send(msgOut)
+		_, err = b.api.Send(msgOut)
+		if err != nil {
+			log.Printf("Ошибка при отправке сообщения: %v", err)
+		}
 
 	default:
 		b.send(chatID, fmt.Sprintf("❌ Неизвестная команда. Используйте [/help](%s) для списка доступных команд.", fmt.Sprintf(helpCommandURL, b.api.Self.UserName)))
@@ -246,11 +252,22 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 
 		flight, err := b.repo.GetFlightByUID(ctx, uid)
 		if err != nil {
-			b.api.Request(tgbotapi.NewCallback(cb.ID, "Рейс не найден!"))
+			log.Printf("Ошибка при получении рейса по UID %s: %v", uid, err)
+			_, err := b.api.Request(tgbotapi.NewCallback(cb.ID, "Рейс не найден!"))
+			if err != nil {
+				log.Printf("Ошибка при отправке колбека: %v", err)
+			}
 			return
 		}
 
-		_ = b.repo.SubscribeToUID(ctx, cb.Message.Chat.ID, flight.Code, uid)
+		if err = b.repo.SubscribeToUID(ctx, cb.Message.Chat.ID, flight.Code, uid); err != nil {
+			log.Printf("Ошибка при подписке на рейс %s для чата %d: %v", flight.Code, cb.Message.Chat.ID, err)
+			_, err := b.api.Request(tgbotapi.NewCallback(cb.ID, "Произошла ошибка."))
+			if err != nil {
+				log.Printf("Ошибка при отправке колбека: %v", err)
+			}
+			return
+		}
 
 		t, _ := time.Parse(time.RFC3339, flight.SchedTime)
 		reply := fmt.Sprintf("✅ *Подписка оформлена!*\n\n📍 Направление: *%s*\n🕒 Вылет: *%s*\nℹ️ Статус: *%s*\n\n🔔 Вы будете получать уведомления в данном чате.",
@@ -258,16 +275,26 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 
 		editMsg := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, reply)
 		editMsg.ParseMode = "Markdown"
-		b.api.Send(editMsg)
+		_, err = b.api.Send(editMsg)
+		if err != nil {
+			log.Printf("Ошибка при отправке сообщения: %v", err)
+		}
 
 		// Сообщаем телеграму, что колбек обработан
-		b.api.Request(tgbotapi.NewCallback(cb.ID, "Подписка успешна!"))
+		_, err = b.api.Request(tgbotapi.NewCallback(cb.ID, "Подписка успешна!"))
+		if err != nil {
+			log.Printf("Ошибка при отправке колбека: %v", err)
+		}
 	}
 }
 
 // SendAlert рассылает уведомления
 func (b *Bot) SendAlert(ctx context.Context, newF, oldF model.Flight) {
-	chats, _ := b.repo.GetSubscribersForUID(ctx, newF.UID)
+	chats, err := b.repo.GetSubscribersForUID(ctx, newF.UID)
+	if err != nil {
+		log.Printf("Ошибка при получении подписчиков для рейса %s: %v", newF.Code, err)
+		return
+	}
 	if len(chats) == 0 {
 		return
 	}
@@ -330,7 +357,10 @@ func (b *Bot) SendShiftAlert(chatId int64, flightCode string, nextF model.Flight
 func (b *Bot) send(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
-	_, _ = b.api.Send(msg)
+	_, err := b.api.Send(msg)
+	if err != nil {
+		log.Printf("Ошибка при отправке сообщения в чат %d: %v", chatID, err)
+	}
 }
 
 // IsTerminalStatus проверяет, завершен ли рейс
