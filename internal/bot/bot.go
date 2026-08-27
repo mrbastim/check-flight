@@ -317,28 +317,14 @@ func (b *Bot) SendAlert(ctx context.Context, newF, oldF model.Flight) {
 	}
 }
 
-// HandleAutoShift перебрасывает подписки на следующий день, если рейс завершился
-func (b *Bot) HandleAutoShift(ctx context.Context, f model.Flight) {
-	nextFlight, err := b.repo.GetNextFlight(ctx, f.Code, f.SchedTime)
-	if err != nil || nextFlight == nil {
-		return
-	}
+// SendShiftAlert уведомляет о завершении обслуживания рейса и переносе подписки на следующий рейс
+func (b *Bot) SendShiftAlert(chatId int64, flightCode string, nextF model.Flight) {
+	timeNext, _ := time.Parse(time.RFC3339, nextF.SchedTime)
+	msgText := fmt.Sprintf("🏁 Обслуживание рейса *%s* за прошлую дату завершено.\n\n"+
+		"♻️ Подписка перенесена на следующий рейс:\n📅 *%s* | ℹ️ %s",
+		flightCode, timeNext.Format("02.01 15:04"), nextF.Status)
 
-	chats, _ := b.repo.GetSubscribersForUID(ctx, f.UID)
-	if len(chats) == 0 {
-		return
-	}
-
-	_ = b.repo.UpdateSubscriptionUID(ctx, f.UID, nextFlight.UID)
-
-	tNext, _ := time.Parse(time.RFC3339, nextFlight.SchedTime)
-	msgText := fmt.Sprintf("🏁 Рейс *%s* завершен!\n\n♻️ Ваша подписка автоматически переключена на следующий рейс:\n📅 *%s* | ℹ️ %s",
-		f.Code, tNext.Format("02.01 15:04"), nextFlight.Status) +
-		fmt.Sprintf("\n🔗 [Отписаться](%s)", GetUnsubscribeURL(b.api.Self.UserName, f.Code))
-
-	for _, chatID := range chats {
-		b.send(chatID, msgText)
-	}
+	b.send(chatId, msgText)
 }
 
 func (b *Bot) send(chatID int64, text string) {

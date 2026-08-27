@@ -2,12 +2,14 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	"check-flight/internal/bot"
 	"check-flight/internal/model"
 	"check-flight/internal/provider"
+	"check-flight/internal/store"
 	"check-flight/internal/ui"
 )
 
@@ -16,8 +18,18 @@ type Repository interface {
 	SaveChanges(ctx context.Context, updates []model.Flight, inserts []model.Flight) error
 }
 
+type WorkerRepository interface {
+	Repository
+
+	GetOldSubscriptions(ctx context.Context) ([]store.OldSub, error)
+	GetFlightByUID(ctx context.Context, uid string) (*model.Flight, error)
+	GetNextFlight(ctx context.Context, code string, afterTime string) (*model.Flight, error)
+	SwitchSubscriptionUID(ctx context.Context, chatID int64, flightCode, newUID string) error
+	DeleteOldFlights(ctx context.Context) (int64, error)
+}
+
 type Service struct {
-	repo     Repository
+	repo     WorkerRepository
 	provider provider.Provider
 	query    model.Query
 	bot      *bot.Bot
@@ -25,13 +37,14 @@ type Service struct {
 	interval time.Duration
 }
 
-func NewService(repo Repository, p provider.Provider, query model.Query, bot *bot.Bot, print bool, interval time.Duration) *Service {
+func NewService(repo WorkerRepository, p provider.Provider, query model.Query, bot *bot.Bot, print bool, interval time.Duration) *Service {
 	return &Service{repo: repo, provider: p, query: query, bot: bot, print: print, interval: interval}
 }
 
 func (s *Service) Start(ctx context.Context) {
 	log.Printf("Параметры запуска -> Провайдер: '%s', Направление: '%s', Поиск: '%s', Терминал: '%s'\n", s.provider.ID(), s.query.Direction, s.query.Search, s.query.Terminal)
 
+	go s.runWorker(ctx)
 	s.process(ctx)
 
 	ticker := time.NewTicker(s.interval)
@@ -83,10 +96,6 @@ func (s *Service) process(ctx context.Context) {
 				updates = append(updates, f)
 				if s.bot != nil {
 					s.bot.SendAlert(ctx, f, dbFlight)
-
-					if bot.IsTerminalStatus(f.Status) && !bot.IsTerminalStatus(dbFlight.Status) {
-						s.bot.HandleAutoShift(ctx, dbFlight)
-					}
 				}
 			}
 		} else {
@@ -99,4 +108,45 @@ func (s *Service) process(ctx context.Context) {
 		}
 	}
 	log.Printf("Опрос завершен. Найдено изменений: %d\n", changesCount)
+}
+
+func (s *Service) runWorker(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			oldSubs, err := s.repo.GetOldSubscriptions(ctx)
+			if err == nil && len(oldSubs) > 0 {
+				for _, sub := range oldSubs {
+					flight, err := s.repo.GetFlightByUID(ctx, sub.ActiveUID)
+					if err != nil {
+						log.Printf("Ошибка при получении рейса для %s: %v", sub.FlightCode, err)
+						continue
+					}
+					nextFlight, err := s.repo.GetNextFlight(ctx, sub.FlightCode, flight.SchedTime)
+
+					if err != nil {
+						log.Printf("Ошибка при получении следующего рейса для %s: %v", sub.FlightCode, err)
+						continue
+					} else if nextFlight == nil {
+						continue
+					}
+
+					if err := s.repo.SwitchSubscriptionUID(ctx, sub.ChatID, sub.FlightCode, nextFlight.UID); err != nil {
+						log.Printf("Ошибка при переключении UID подписки для %s: %v", fmt.Sprint(sub.ChatID), err)
+						continue
+					} else if s.bot != nil {
+						s.bot.SendShiftAlert(sub.ChatID, sub.FlightCode, *nextFlight)
+					}
+				}
+			}
+			if deleted, err := s.repo.DeleteOldFlights(ctx); err == nil && deleted > 0 {
+				log.Printf("Воркер очистки: удалено %d старых рейсов", deleted)
+			}
+		}
+	}
 }

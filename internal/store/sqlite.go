@@ -18,6 +18,13 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+type OldSub struct {
+	ChatID     int64
+	FlightCode string
+	ActiveUID  string
+	CreatedAt  time.Time
+}
+
 func (r *Repository) Init(db *sql.DB) error {
 	flightsQuery := `
 		CREATE TABLE IF NOT EXISTS flights (
@@ -75,6 +82,46 @@ func NormalizeFlightCode(code string) string {
 		clean = clean[:2] + " " + clean[2:]
 	}
 	return clean
+}
+
+func (r *Repository) GetOldSubscriptions(ctx context.Context) ([]OldSub, error) {
+	msk := time.FixedZone("MSK", 3*60*60)
+	threshold := time.Now().In(msk).Add(-30 * 24 * time.Hour).Format(time.RFC3339)
+	query := `SELECT chat_id, flight_code, active_uid, created_at FROM subscriptions WHERE created_at < ?`
+	rows, err := r.db.QueryContext(ctx, query, threshold)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var oldSubs []OldSub
+	for rows.Next() {
+		var sub OldSub
+		if err := rows.Scan(&sub.ChatID, &sub.FlightCode, &sub.ActiveUID, &sub.CreatedAt); err == nil {
+			oldSubs = append(oldSubs, sub)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return oldSubs, nil
+}
+
+func (r *Repository) SwitchSubscriptionUID(ctx context.Context, chatID int64, flightCode, newUID string) error {
+	query := `UPDATE subscriptions SET active_uid = ? created_at = CURRENT_TIMESTAMP WHERE chat_id = ? AND flight_code = ?`
+	_, err := r.db.ExecContext(ctx, query, newUID, chatID, flightCode)
+	return err
+}
+
+func (r *Repository) DeleteOldFlights(ctx context.Context) (int64, error) {
+	msk := time.FixedZone("MSK", 3*60*60)
+	threshold := time.Now().In(msk).Add(-30 * 24 * time.Hour).Format(time.RFC3339)
+	query := `DELETE FROM flights WHERE sched_time < ?`
+	res, err := r.db.ExecContext(ctx, query, threshold)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (r *Repository) FindUpcomingFlights(ctx context.Context, rawCode string) ([]model.Flight, error) {
@@ -139,6 +186,9 @@ func (r *Repository) GetNextFlight(ctx context.Context, code string, afterTime s
 	err := row.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate,
 		&f.Terminal, &f.CheckInDesk)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // не найден следующий рейс в расписании
+		}
 		return nil, err
 	}
 	return &f, nil
