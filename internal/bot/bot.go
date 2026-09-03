@@ -1,15 +1,22 @@
 package bot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"check-flight/internal/model"
 	"check-flight/internal/provider"
@@ -23,6 +30,35 @@ type Bot struct {
 	searchMu  sync.RWMutex
 	searches  map[string]string
 	searchSeq uint64
+	tmpl      *template.Template
+}
+
+type searchTemplateData struct {
+	City           string
+	DirectionTitle string
+	Page           int
+	PageCount      int
+	Token          string
+	CurrentDir     string
+	FilterAll      string
+	FilterDep      string
+	FilterArr      string
+	HasPrev        bool
+	PrevPage       int
+	HasNext        bool
+	NextPage       int
+	Flights        []flightRenderData
+}
+
+type flightRenderData struct {
+	Icon     string
+	Provider string
+	Dest     string
+	Code     string
+	Arrow    string
+	Date     string
+	Time     string
+	UID      string
 }
 
 const (
@@ -42,13 +78,21 @@ const (
 	searchCommandURL     = "https://t.me/%s?text=/search %s"
 )
 
+const flightsPerPage = 5
+
 func New(token string, repo *store.Repository, providers *provider.Registry) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("telegram auth error: %w", err)
 	}
+
+	tmpl, err := template.ParseGlob("internal/bot/templates/*.html")
+	if err != nil {
+		return nil, fmt.Errorf("template parse error: %w", err)
+	}
+
 	log.Printf("Авторизован Telegram-бот: @%s", api.Self.UserName)
-	return &Bot{api: api, repo: repo, providers: providers, searches: make(map[string]string)}, nil
+	return &Bot{api: api, repo: repo, providers: providers, searches: make(map[string]string), tmpl: tmpl}, nil
 }
 
 func (b *Bot) Start(ctx context.Context) {
@@ -208,6 +252,16 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 			b.send(chatID, fmt.Sprintf("❌ Укажите город вылета или прилета. Пример: [/search Москва](%s)", fmt.Sprintf(searchCommandURL, b.api.Self.UserName, "")))
 			return
 		}
+		flights, err := b.repo.GetFlightsByCity(ctx, args)
+		if err != nil {
+			log.Printf("Ошибка поиска рейсов по городу %s: %v", args, err)
+			return
+		}
+		if len(flights) == 0 {
+			b.send(chatID, fmt.Sprintf("Рейсы по городу *%s* не найдены в расписании на ближайшие дни.", args))
+			return
+		}
+
 		b.sendFlightSearch(ctx, chatID, args)
 
 	default:
@@ -226,17 +280,12 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		if err != nil {
 			return
 		}
-		text, markup, err := b.flightSearchPage(ctx, parts[1], parts[2], page)
-		if err != nil || text == "" {
+		htmlData, err := b.buildRichSearchPage(ctx, parts[1], parts[2], page)
+		if err != nil {
 			b.answerCallback(cb.ID, "Результаты поиска устарели")
 			return
 		}
-		editMsg := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, text)
-		editMsg.ParseMode = "Markdown"
-		editMsg.ReplyMarkup = &markup
-		if _, err := b.api.Send(editMsg); err != nil {
-			log.Printf("Ошибка при обновлении результатов поиска: %v", err)
-		}
+		b.editRichMessage(cb.Message.Chat.ID, cb.Message.MessageID, htmlData)
 		b.answerCallback(cb.ID, "")
 		return
 	}
@@ -412,25 +461,81 @@ func (b *Bot) send(chatID int64, text string) {
 	}
 }
 
-// IsTerminalStatus проверяет, завершен ли рейс
-func IsTerminalStatus(status string) bool {
-	s := strings.ToLower(status)
-	s = strings.ReplaceAll(s, "ё", "е")
-	return strings.Contains(s, "прибыл") || strings.Contains(s, "посадку") ||
-		strings.Contains(s, "вылетел") || strings.Contains(s, "отправлен") ||
-		strings.Contains(s, "отменен")
+func (b *Bot) newSearch(city string) string {
+	token := strconv.FormatUint(atomic.AddUint64(&b.searchSeq, 1), 10)
+	b.searchMu.Lock()
+	if b.searches == nil {
+		b.searches = make(map[string]string)
+	}
+	b.searches[token] = city
+	b.searchMu.Unlock()
+	return token
 }
 
-func InFlightStatus(status string) bool {
-	s := strings.ToLower(status)
-	s = strings.ReplaceAll(s, "ё", "е")
-	return strings.Contains(s, "в полете")
+func (b *Bot) searchCity(token string) (string, bool) {
+	b.searchMu.RLock()
+	city, ok := b.searches[token]
+	b.searchMu.RUnlock()
+	return city, ok
 }
 
-func GetSubscribeURL(botUsername, flightCode string) string {
-	return strings.ReplaceAll(fmt.Sprintf(subscribeCommandURL, botUsername, flightCode), " ", "%20")
+// Отправка нового поиска
+func (b *Bot) sendFlightSearch(ctx context.Context, chatID int64, city string) {
+	token := b.newSearch(city)
+	htmlData, err := b.buildRichSearchPage(ctx, token, "all", 0)
+	if err != nil {
+		b.send(chatID, "❌ Ошибка при поиске рейсов или поиск устарел.")
+		return
+	}
+
+	b.sendRichMessage(chatID, htmlData)
 }
 
-func GetUnsubscribeURL(botUsername, flightCode string) string {
-	return strings.ReplaceAll(fmt.Sprintf(unsubscribeCommandURL, botUsername, flightCode), " ", "%20")
+func (b *Bot) sendSearchTable(chatID int64, city string, flights []model.Flight) {
+	data := searchTemplateData{
+		City: cases.Title(language.Und, cases.NoLower).String(city),
+	}
+
+	for _, f := range flights {
+		t, _ := time.Parse(time.RFC3339, f.SchedTime)
+		icon := "🛫"
+		dest := f.City
+		if f.Direction == "arr" {
+			icon = "🛬"
+			dest = f.City // = "Прилет"
+		}
+
+		data.Flights = append(data.Flights, flightRenderData{
+			Icon:     icon,
+			Provider: cases.Title(language.Und, cases.NoLower).String(f.Provider),
+			Dest:     dest,
+			Code:     f.Code,
+			Date:     t.Format("02.01"),
+			Time:     t.Format("15:04"),
+			UID:      f.UID,
+		})
+	}
+
+	var buf bytes.Buffer
+	if err := b.tmpl.ExecuteTemplate(&buf, "search_response.html", data); err != nil {
+		log.Printf("Ошибка при рендеринге шаблона: %v", err)
+		return
+	}
+
+	type inputRichMessage struct {
+		HTML string `json:"html"`
+	}
+
+	richMsgBytes, err := json.Marshal(inputRichMessage{HTML: buf.String()})
+	if err != nil {
+		log.Printf("Ошибка JSON маршалинга rich_message: %v", err)
+		return
+	}
+
+	params := tgbotapi.Params{"chat_id": strconv.FormatInt(chatID, 10), "rich_message": string(richMsgBytes)}
+	_, err = b.api.MakeRequest("sendRichMessage", params)
+	if err != nil {
+		log.Printf("Ошибка при отправке сообщения: %v", err)
+		b.send(chatID, "❌ Ваш клиент Telegram не поддерживает новый формат таблиц.")
+	}
 }

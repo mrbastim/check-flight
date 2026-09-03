@@ -1,0 +1,36 @@
+<h3>🔎 Рейсы: {{.City}}</h3>
+<b>{{.DirectionTitle}}</b> (Страница {{.Page}} из {{.PageCount}})<br>
+
+<table bordered striped compact>
+  <tr>
+    <td align="left"><b>Направление</b></td>
+    <td align="center"><b>Время</b></td>
+    <td align="center"><b>Инфо</b></td>
+  </tr>
+  {{range .Flights}}
+  <tr>
+    <td align="left">{{.Icon}} {{.Provider}} {{.Arrow}} {{.Dest}}<br><b>{{.Code}}</b></td>
+    <td align="center">{{.Date}}<br>{{.Time}}</td>
+    <td align="center">
+      <tg-button type="callback_data" style="primary" data="info:{{.UID}}">Выбрать</tg-button>
+    </td>
+  </tr>
+  {{end}}
+</table>
+
+<br>
+<tg-button type="callback_data" data="fl:{{.Token}}:all:0">{{.FilterAll}}</tg-button>
+<tg-button type="callback_data" data="fl:{{.Token}}:dep:0">{{.FilterDep}}</tg-button>
+<tg-button type="callback_data" data="fl:{{.Token}}:arr:0">{{.FilterArr}}</tg-button>
+<br>
+
+<table compact>
+  <tr>
+    {{if .HasPrev}}
+    <td align="left"><tg-button type="callback_data" style="secondary" data="pg:{{.Token}}:{{.CurrentDir}}:{{.PrevPage}}">⬅️ Назад</tg-button></td>
+    {{end}}
+    {{if .HasNext}}
+    <td align="right"><tg-button type="callback_data" style="secondary" data="pg:{{.Token}}:{{.CurrentDir}}:{{.NextPage}}">Вперед ➡️</tg-button></td>
+    {{end}}
+  </tr>
+</table>
