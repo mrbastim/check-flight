@@ -88,15 +88,18 @@ func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, 
 		if IsBaggageClaimStatus(f.Status) {
 			baggageBelt = f.BaggageBelt
 		}
-		gate := template.HTML(html.EscapeString(f.Gate))
-		if f.GateChanged {
-			gate = template.HTML("<font color=\"red\"><b>" + html.EscapeString(f.Gate) + "</b></font>")
+		gate := template.HTML("")
+		if f.Gate != "" && !IsTerminalStatus(f.Status) {
+			gate = template.HTML(html.EscapeString(f.Gate))
+			if f.GateChanged {
+				gate = template.HTML("<b>" + html.EscapeString(f.Gate) + "</b>")
+			}
 		}
 		if f.CheckInDeskChanged {
-			checkInDesk = "<font color=\"red\"><b>" + html.EscapeString(checkInDesk) + "</b></font>"
+			checkInDesk = "<b>" + html.EscapeString(checkInDesk) + "</b>"
 		}
 		if f.BaggageBeltChanged {
-			baggageBelt = "<font color=\"red\"><b>" + html.EscapeString(baggageBelt) + "</b></font>"
+			baggageBelt = "<b>" + html.EscapeString(baggageBelt) + "</b>"
 		}
 
 		data.Flights = append(data.Flights, flightRenderData{
@@ -140,7 +143,7 @@ func formatFlightTime(scheduled, estimated string) template.HTML {
 	if err != nil || estimatedTime.Equal(scheduledTime) {
 		return template.HTML(scheduledTime.Format("15:04"))
 	}
-	return template.HTML("<s>" + scheduledTime.Format("15:04") + "</s> <font color=\"red\"><b>" + estimatedTime.Format("15:04") + "</b></font>")
+	return template.HTML("<s>" + scheduledTime.Format("15:04") + "</s> <b>" + estimatedTime.Format("15:04") + "</b>")
 }
 
 // Вспомогательная отправка Rich Message

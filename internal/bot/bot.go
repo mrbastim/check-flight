@@ -142,6 +142,11 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		b.send(chatID, text)
 		return
 	case "track":
+		if args == "" {
+			b.send(chatID, fmt.Sprintf("❌ Укажите номер рейса. Пример: [/track SU 1234](%s)", GetSubscribeURL(b.api.Self.UserName, "")))
+			return
+		}
+
 		code := store.NormalizeFlightCode(args)
 
 		flights, err := b.repo.FindUpcomingFlights(ctx, code)
