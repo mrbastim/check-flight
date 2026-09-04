@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"flag"
 	"fmt"
 	"io"
@@ -19,8 +18,6 @@ import (
 	"check-flight/internal/provider"
 	"check-flight/internal/store"
 	"check-flight/internal/ui"
-
-	_ "github.com/mattn/go-sqlite3" // Драйвер SQLite
 )
 
 func getEnv(key, fallback string) string {
@@ -52,6 +49,8 @@ func main() {
 
 	envProvider := getEnv("PROVIDER", "svo")
 	envToken := getEnv("TELEGRAM_BOT_TOKEN", getEnv("TG_TOKEN", ""))
+	envDBDriver := getEnv("DB_DRIVER", "sqlite")
+	envDatabaseURL := getEnv("DATABASE_URL", "./flights.db")
 
 	providerParam := flag.String("provider", envProvider, "Провайдер/аэропорт (или env: PROVIDER)")
 	tgToken := flag.String("token", envToken, "Telegram Bot Token (или env: TELEGRAM_BOT_TOKEN)")
@@ -82,20 +81,15 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db, err := sql.Open("sqlite3", "./flights.db")
+	db, repository, err := store.Open(envDBDriver, envDatabaseURL)
 	if err != nil {
 		log.Fatal("Ошибка открытия БД: ", err)
 	}
 	defer db.Close()
 
-	sqlRepo := store.NewRepository(db)
-	if err := sqlRepo.Init(db); err != nil {
-		log.Fatal(err)
-	}
-
 	var tgBot *bot.Bot
 	if *tgToken != "" {
-		tgBot, err = bot.New(*tgToken, sqlRepo, providers)
+		tgBot, err = bot.New(*tgToken, repository, providers)
 		if err != nil {
 			log.Fatalf("Ошибка создания бота: %v", err)
 		}
@@ -110,7 +104,7 @@ func main() {
 		Terminal:  *terminalParam,
 	}
 
-	svc := monitor.NewService(sqlRepo, p, query, tgBot, !*printParam, 1*time.Minute)
+	svc := monitor.NewService(repository, p, query, tgBot, !*printParam, 1*time.Minute)
 
 	go svc.Start(ctx)
 

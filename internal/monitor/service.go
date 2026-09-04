@@ -13,23 +13,8 @@ import (
 	"check-flight/internal/ui"
 )
 
-type Repository interface {
-	LoadFlights(ctx context.Context) (map[string]model.Flight, error)
-	SaveChanges(ctx context.Context, updates []model.Flight, inserts []model.Flight) error
-}
-
-type WorkerRepository interface {
-	Repository
-
-	GetOldSubscriptions(ctx context.Context) ([]store.OldSub, error)
-	GetFlightByUID(ctx context.Context, uid string) (*model.Flight, error)
-	GetNextFlight(ctx context.Context, code string, afterTime string) (*model.Flight, error)
-	SwitchSubscriptionUID(ctx context.Context, chatID int64, flightCode, newUID string) error
-	DeleteOldFlights(ctx context.Context) (int64, error)
-}
-
 type Service struct {
-	repo     WorkerRepository
+	repo     store.Storage
 	provider provider.Provider
 	query    model.Query
 	bot      *bot.Bot
@@ -37,7 +22,7 @@ type Service struct {
 	interval time.Duration
 }
 
-func NewService(repo WorkerRepository, p provider.Provider, query model.Query, bot *bot.Bot, print bool, interval time.Duration) *Service {
+func NewService(repo store.Storage, p provider.Provider, query model.Query, bot *bot.Bot, print bool, interval time.Duration) *Service {
 	return &Service{repo: repo, provider: p, query: query, bot: bot, print: print, interval: interval}
 }
 

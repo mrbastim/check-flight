@@ -25,7 +25,7 @@ import (
 
 type Bot struct {
 	api       *tgbotapi.BotAPI
-	repo      *store.Repository
+	repo      store.Storage
 	providers *provider.Registry
 	searchMu  sync.RWMutex
 	searches  map[string]string
@@ -87,7 +87,7 @@ const (
 
 const flightsPerPage = 5
 
-func New(token string, repo *store.Repository, providers *provider.Registry) (*Bot, error) {
+func New(token string, repo store.Storage, providers *provider.Registry) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("telegram auth error: %w", err)

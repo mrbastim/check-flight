@@ -14,6 +14,8 @@ type Repository struct {
 	db *sql.DB
 }
 
+var _ Storage = (*Repository)(nil)
+
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
@@ -25,7 +27,7 @@ type OldSub struct {
 	CreatedAt  time.Time
 }
 
-func (r *Repository) Init(db *sql.DB) error {
+func (r *Repository) Init() error {
 	flightsQuery := `
 		CREATE TABLE IF NOT EXISTS flights (
 		uid          TEXT PRIMARY KEY,  -- "svo:dep:SU1484:2026-08-06T00:05:00+03:00"
@@ -48,7 +50,7 @@ func (r *Repository) Init(db *sql.DB) error {
 
 		CREATE INDEX IF NOT EXISTS idx_flights_provider_dir 
 			ON flights (provider, direction);`
-	_, err := db.Exec(flightsQuery)
+	_, err := r.db.Exec(flightsQuery)
 	if err != nil {
 		return err
 	}
@@ -64,12 +66,12 @@ func (r *Repository) Init(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_subs_uid ON subscriptions(active_uid);
 		`
-	_, err = db.Exec(subsQuery)
+	_, err = r.db.Exec(subsQuery)
 	if err != nil {
 		return err
 	}
 
-	if _, err := db.Exec(`ALTER TABLE flights ADD COLUMN check_in_desk TEXT`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+	if _, err := r.db.Exec(`ALTER TABLE flights ADD COLUMN check_in_desk TEXT`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return err
 	}
 	for _, column := range []string{
@@ -78,7 +80,7 @@ func (r *Repository) Init(db *sql.DB) error {
 		"baggage_belt_changed INTEGER NOT NULL DEFAULT 0",
 		"check_in_desk_changed INTEGER NOT NULL DEFAULT 0",
 	} {
-		if _, err := db.Exec("ALTER TABLE flights ADD COLUMN " + column); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		if _, err := r.db.Exec("ALTER TABLE flights ADD COLUMN " + column); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}
 	}
