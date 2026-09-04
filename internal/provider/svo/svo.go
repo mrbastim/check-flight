@@ -15,15 +15,22 @@ import (
 type client struct{}
 
 type flightAPI struct {
-	AD          string `json:"ad"` // "D" (Вылет) или "A" (Прилет)
-	Number      string `json:"flt"`
-	IID         string `json:"i_id"`
-	Status      string `json:"vip_status_rus"`
-	Terminal    string `json:"term"`
-	Gate        string `json:"gate_id"`
-	Baggage     string `json:"bbel_id"`
-	SchedTime   string `json:"t_st"`
-	CheckInDesk string `json:"chin_id"`
+	AD               string `json:"ad"` // "D" (Вылет) или "A" (Прилет)
+	Number           string `json:"flt"`
+	IID              string `json:"i_id"`
+	Status           string `json:"vip_status_rus"`
+	Terminal         string `json:"term"`
+	Gate             string `json:"gate_id"`
+	Baggage          string `json:"bbel_id"`
+	SchedTime        string `json:"t_st"`
+	EstimatedTime    string `json:"t_et"`
+	CheckInDesk      string `json:"chin_id"`
+	ActualDeparture  string `json:"t_otpr"`
+	ActualArrival    string `json:"t_at"`
+	EstimatedArrival string `json:"t_at_mar"`
+	OldTerminal      string `json:"old_term"`
+	OldGate          string `json:"old_gate_id"`
+	OldBaggage       string `json:"old_bbel_id"`
 
 	Company struct {
 		Code string `json:"code"`
@@ -135,6 +142,12 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 		}
 
 		bbel := item.Baggage
+		estimatedTime := item.EstimatedTime
+		if isArrival && item.ActualArrival != "" {
+			estimatedTime = item.ActualArrival
+		} else if !isArrival && item.ActualDeparture != "" {
+			estimatedTime = item.ActualDeparture
+		}
 
 		// Форматируем код и UID
 		cleanCompany := strings.TrimSpace(item.Company.Code)
@@ -143,18 +156,21 @@ func (c *client) Fetch(ctx context.Context, query model.Query) ([]model.Flight, 
 		uid := fmt.Sprintf("%s:%s:%s%s:%s", c.ID(), direction, cleanCompany, cleanNum, item.SchedTime)
 
 		flights = append(flights, model.Flight{
-			UID:         uid,
-			InternalID:  internalID,
-			Provider:    c.ID(),
-			Direction:   direction,
-			Code:        code,
-			City:        city,
-			SchedTime:   item.SchedTime,
-			Status:      item.Status,
-			Gate:        item.Gate,
-			Terminal:    item.Terminal,
-			BaggageBelt: bbel,
-			CheckInDesk: item.CheckInDesk,
+			UID:                uid,
+			InternalID:         internalID,
+			Provider:           c.ID(),
+			Direction:          direction,
+			Code:               code,
+			City:               city,
+			SchedTime:          item.SchedTime,
+			EstimatedTime:      estimatedTime,
+			Status:             item.Status,
+			Gate:               item.Gate,
+			Terminal:           item.Terminal,
+			BaggageBelt:        bbel,
+			CheckInDesk:        item.CheckInDesk,
+			GateChanged:        item.OldGate != "" && item.OldGate != item.Gate,
+			BaggageBeltChanged: item.OldBaggage != "" && item.OldBaggage != bbel,
 		})
 	}
 

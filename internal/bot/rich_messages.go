@@ -88,6 +88,16 @@ func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, 
 		if IsBaggageClaimStatus(f.Status) {
 			baggageBelt = f.BaggageBelt
 		}
+		gate := template.HTML(html.EscapeString(f.Gate))
+		if f.GateChanged {
+			gate = template.HTML("<font color=\"red\"><b>" + html.EscapeString(f.Gate) + "</b></font>")
+		}
+		if f.CheckInDeskChanged {
+			checkInDesk = "<font color=\"red\"><b>" + html.EscapeString(checkInDesk) + "</b></font>"
+		}
+		if f.BaggageBeltChanged {
+			baggageBelt = "<font color=\"red\"><b>" + html.EscapeString(baggageBelt) + "</b></font>"
+		}
 
 		data.Flights = append(data.Flights, flightRenderData{
 			Icon:        icon,
@@ -96,10 +106,11 @@ func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, 
 			Code:        f.Code,
 			Arrow:       arrow,
 			Terminal:    f.Terminal,
-			CheckInDesk: checkInDesk,
-			BaggageBelt: baggageBelt,
+			Gate:        gate,
+			CheckInDesk: template.HTML(checkInDesk),
+			BaggageBelt: template.HTML(baggageBelt),
 			Date:        t.Format("02.01"),
-			Time:        t.Format("15:04"),
+			Time:        formatFlightTime(f.SchedTime, f.EstimatedTime),
 			UID:         f.UID,
 			Info:        template.HTML(infoStr),
 			ActionURL:   actionLink,
@@ -114,6 +125,22 @@ func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, 
 		return "", markup, err
 	}
 	return buf.String(), markup, nil
+}
+
+func formatFlightTime(scheduled, estimated string) template.HTML {
+	scheduledTime, err := time.Parse(time.RFC3339, scheduled)
+	if err != nil {
+		return ""
+	}
+	if estimated == "" || estimated == scheduled {
+		return template.HTML(scheduledTime.Format("15:04"))
+	}
+
+	estimatedTime, err := time.Parse(time.RFC3339, estimated)
+	if err != nil || estimatedTime.Equal(scheduledTime) {
+		return template.HTML(scheduledTime.Format("15:04"))
+	}
+	return template.HTML("<s>" + scheduledTime.Format("15:04") + "</s> <font color=\"red\"><b>" + estimatedTime.Format("15:04") + "</b></font>")
 }
 
 // Вспомогательная отправка Rich Message

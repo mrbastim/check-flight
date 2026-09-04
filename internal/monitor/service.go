@@ -77,13 +77,21 @@ func (s *Service) process(ctx context.Context) {
 		return
 	}
 
+	uniqueFlights := make(map[string]model.Flight, len(flights))
+	for _, f := range flights {
+		uniqueFlights[f.UID] = f
+	}
+
 	var updates, inserts []model.Flight
 	var changesCount int
 
-	for _, f := range flights {
+	for _, f := range uniqueFlights {
 		dbFlight, exists := savedFlights[f.UID]
 
 		if exists {
+			f.GateChanged = f.GateChanged || (f.Gate != "" && f.Gate != dbFlight.Gate)
+			f.BaggageBeltChanged = f.BaggageBeltChanged || (f.BaggageBelt != "" && f.BaggageBelt != dbFlight.BaggageBelt)
+			f.CheckInDeskChanged = f.CheckInDesk != "" && f.CheckInDesk != dbFlight.CheckInDesk
 			if f.Status == "" {
 				f.Status = dbFlight.Status
 			}
@@ -100,7 +108,8 @@ func (s *Service) process(ctx context.Context) {
 				f.CheckInDesk = dbFlight.CheckInDesk
 			}
 
-			if (f.Status != "" && f.Status != dbFlight.Status) ||
+			if (f.EstimatedTime != dbFlight.EstimatedTime) ||
+				(f.Status != "" && f.Status != dbFlight.Status) ||
 				(f.Gate != "" && f.Gate != dbFlight.Gate) ||
 				(f.Terminal != "" && f.Terminal != dbFlight.Terminal) ||
 				(f.BaggageBelt != "" && f.BaggageBelt != dbFlight.BaggageBelt) ||

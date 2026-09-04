@@ -57,10 +57,11 @@ type flightRenderData struct {
 	Code        string
 	Arrow       string
 	Terminal    string
-	CheckInDesk string
-	BaggageBelt string
+	Gate        template.HTML
+	CheckInDesk template.HTML
+	BaggageBelt template.HTML
 	Date        string
-	Time        string
+	Time        template.HTML
 	UID         string
 	Info        template.HTML
 	ActionURL   string
@@ -258,21 +259,26 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 			b.send(chatID, fmt.Sprintf("❌ Укажите город вылета или прилета. Пример: [/search Москва](%s)", fmt.Sprintf(searchCommandURL, b.api.Self.UserName, "")))
 			return
 		}
-		flights, err := b.repo.GetFlightsByCity(ctx, args)
+		city := normalizeSearchCity(args)
+		flights, err := b.repo.GetFlightsByCity(ctx, city)
 		if err != nil {
-			log.Printf("Ошибка поиска рейсов по городу %s: %v", args, err)
+			log.Printf("Ошибка поиска рейсов по городу %s: %v", city, err)
 			return
 		}
 		if len(flights) == 0 {
-			b.send(chatID, fmt.Sprintf("Рейсы по городу *%s* не найдены в расписании на ближайшие дни.", args))
+			b.send(chatID, fmt.Sprintf("Рейсы по городу *%s* не найдены в расписании на ближайшие дни.", city))
 			return
 		}
 
-		b.sendFlightSearch(ctx, chatID, args)
+		b.sendFlightSearch(ctx, chatID, city)
 
 	default:
 		b.send(chatID, fmt.Sprintf("❌ Неизвестная команда. Используйте [/help](%s) для списка доступных команд.", fmt.Sprintf(helpCommandURL, b.api.Self.UserName)))
 	}
+}
+
+func normalizeSearchCity(city string) string {
+	return cases.Title(language.Und, cases.NoLower).String(strings.TrimSpace(city))
 }
 
 // Обработка нажатия на кнопку (выбор даты)
@@ -520,7 +526,7 @@ func (b *Bot) sendSearchTable(chatID int64, city string, flights []model.Flight)
 			Code:     f.Code,
 			Terminal: f.Terminal,
 			Date:     t.Format("02.01"),
-			Time:     t.Format("15:04"),
+			Time:     template.HTML(t.Format("15:04")),
 			UID:      f.UID,
 		})
 	}
