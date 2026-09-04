@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"html/template"
 	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -75,22 +76,17 @@ func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, 
 
 		var externalLink string
 		if provider, ok := b.providers.Get(f.Provider); ok {
-			externalLink = provider.GetFlightURL(f.UID, f.Direction)
+			externalLink = provider.GetFlightURL(f.InternalID, f.Direction)
 		}
 
-		var infoParts []string
-		if f.Terminal != "" {
-			infoParts = append(infoParts, "Терминал: "+f.Terminal)
+		infoStr := html.EscapeString(f.Status)
+		checkInDesk := ""
+		if IsCheckInStatus(f.Status) {
+			checkInDesk = f.CheckInDesk
 		}
-		if f.Gate != "" && !IsTerminalStatus(f.Status) {
-			infoParts = append(infoParts, "🚪: "+f.Gate)
-		}
-		infoStr := strings.Join(infoParts, " ")
-		if f.Status != "" {
-			if infoStr != "" {
-				infoStr += "\n"
-			}
-			infoStr += f.Status
+		baggageBelt := ""
+		if IsBaggageClaimStatus(f.Status) {
+			baggageBelt = f.BaggageBelt
 		}
 
 		data.Flights = append(data.Flights, flightRenderData{
@@ -99,10 +95,13 @@ func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, 
 			Dest:        dest,
 			Code:        f.Code,
 			Arrow:       arrow,
+			Terminal:    f.Terminal,
+			CheckInDesk: checkInDesk,
+			BaggageBelt: baggageBelt,
 			Date:        t.Format("02.01"),
 			Time:        t.Format("15:04"),
 			UID:         f.UID,
-			Info:        infoStr,
+			Info:        template.HTML(infoStr),
 			ActionURL:   actionLink,
 			ExternalURL: externalLink,
 		})

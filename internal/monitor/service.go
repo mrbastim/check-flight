@@ -175,7 +175,9 @@ func (s *Service) runWorkerIteration(ctx context.Context) {
 
 	if deleted, err := s.repo.DeleteOldFlights(ctx); err == nil && deleted > 0 {
 		log.Printf("Воркер очистки: удалено %d старых рейсов", deleted)
-	} else if err != nil {
+	} else if deleted == 0 {
+		log.Printf("Воркер очистки: нет старых рейсов для удаления")
+	} else {
 		log.Printf("Воркер очистки: ошибка при удалении старых рейсов: %v", err)
 	}
 }

@@ -35,6 +35,18 @@ func IsTerminalStatus(status string) bool {
 		strings.Contains(s, "отменен")
 }
 
+func IsCheckInStatus(status string) bool {
+	s := strings.ToLower(status)
+	s = strings.ReplaceAll(s, "ё", "е")
+	return strings.Contains(s, "регистрац")
+}
+
+func IsBaggageClaimStatus(status string) bool {
+	s := strings.ToLower(status)
+	s = strings.ReplaceAll(s, "ё", "е")
+	return strings.Contains(s, "выдач") && strings.Contains(s, "багаж")
+}
+
 func InFlightStatus(status string) bool {
 	s := strings.ToLower(status)
 	s = strings.ReplaceAll(s, "ё", "е")

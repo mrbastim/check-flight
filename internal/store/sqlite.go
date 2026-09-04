@@ -160,7 +160,7 @@ func (r *Repository) GetFlightByUID(ctx context.Context, uid string) (*model.Fli
 }
 
 func (r *Repository) GetFlightsByCity(ctx context.Context, city string) ([]model.Flight, error) {
-	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal, check_in_desk
+	query := `SELECT uid, internal_id, provider, direction, flight_code, city, sched_time, status, gate, terminal, baggage_belt, check_in_desk
 				FROM flights WHERE city = ? ORDER BY sched_time ASC`
 	rows, err := r.db.QueryContext(ctx, query, city)
 	if err != nil {
@@ -171,7 +171,7 @@ func (r *Repository) GetFlightsByCity(ctx context.Context, city string) ([]model
 	var flights []model.Flight
 	for rows.Next() {
 		var f model.Flight
-		if err := rows.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal, &f.CheckInDesk); err == nil {
+		if err := rows.Scan(&f.UID, &f.InternalID, &f.Provider, &f.Direction, &f.Code, &f.City, &f.SchedTime, &f.Status, &f.Gate, &f.Terminal, &f.BaggageBelt, &f.CheckInDesk); err == nil {
 			flights = append(flights, f)
 		}
 	}

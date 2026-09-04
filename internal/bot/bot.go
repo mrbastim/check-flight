@@ -56,10 +56,13 @@ type flightRenderData struct {
 	Dest        string
 	Code        string
 	Arrow       string
+	Terminal    string
+	CheckInDesk string
+	BaggageBelt string
 	Date        string
 	Time        string
 	UID         string
-	Info        string
+	Info        template.HTML
 	ActionURL   string
 	ExternalURL string
 }
@@ -515,6 +518,7 @@ func (b *Bot) sendSearchTable(chatID int64, city string, flights []model.Flight)
 			Provider: cases.Title(language.Und, cases.NoLower).String(f.Provider),
 			Dest:     dest,
 			Code:     f.Code,
+			Terminal: f.Terminal,
 			Date:     t.Format("02.01"),
 			Time:     t.Format("15:04"),
 			UID:      f.UID,
