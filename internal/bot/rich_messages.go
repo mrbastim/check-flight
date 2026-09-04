@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -18,19 +19,19 @@ import (
 )
 
 // Генерация HTML страницы для Rich Message
-func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, page int) (string, error) {
+func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, page int) (string, tgbotapi.InlineKeyboardMarkup, error) {
 	city, ok := b.searchCity(token)
 	if !ok {
-		return "", fmt.Errorf("поиск устарел")
+		return "", tgbotapi.InlineKeyboardMarkup{}, fmt.Errorf("поиск устарел")
 	}
 
 	flights, err := b.repo.GetFlightsByCity(ctx, city)
 	if err != nil {
-		return "", err
+		return "", tgbotapi.InlineKeyboardMarkup{}, err
 	}
 	flights = filterFlights(flights, direction)
 	if len(flights) == 0 {
-		return "<h3>Рейсы не найдены</h3>", nil
+		return "<h3>Рейсы не найдены</h3>", tgbotapi.InlineKeyboardMarkup{}, nil
 	}
 
 	pageCount := (len(flights) + flightsPerPage - 1) / flightsPerPage
@@ -70,53 +71,84 @@ func (b *Bot) buildRichSearchPage(ctx context.Context, token, direction string, 
 			icon, dest, arrow = "🛬", f.City, "←"
 		}
 
+		actionLink := GetInfoURL(b.api.Self.UserName, f.Code)
+
+		var externalLink string
+		if provider, ok := b.providers.Get(f.Provider); ok {
+			externalLink = provider.GetFlightURL(f.UID, f.Direction)
+		}
+
+		var infoParts []string
+		if f.Terminal != "" {
+			infoParts = append(infoParts, "Терминал: "+f.Terminal)
+		}
+		if f.Gate != "" && !IsTerminalStatus(f.Status) {
+			infoParts = append(infoParts, "🚪: "+f.Gate)
+		}
+		infoStr := strings.Join(infoParts, " ")
+		if f.Status != "" {
+			if infoStr != "" {
+				infoStr += "\n"
+			}
+			infoStr += f.Status
+		}
+
 		data.Flights = append(data.Flights, flightRenderData{
-			Icon:     icon,
-			Provider: provider.ParseProviderNameByID(f.Provider),
-			Dest:     dest,
-			Code:     f.Code,
-			Arrow:    arrow,
-			Date:     t.Format("02.01"),
-			Time:     t.Format("15:04"),
-			UID:      f.UID,
+			Icon:        icon,
+			Provider:    provider.ParseProviderNameByID(f.Provider),
+			Dest:        dest,
+			Code:        f.Code,
+			Arrow:       arrow,
+			Date:        t.Format("02.01"),
+			Time:        t.Format("15:04"),
+			UID:         f.UID,
+			Info:        infoStr,
+			ActionURL:   actionLink,
+			ExternalURL: externalLink,
 		})
 	}
 
+	markup := b.buildSearchKeyboard(token, direction, page, pageCount)
+
 	var buf bytes.Buffer
 	if err := b.tmpl.ExecuteTemplate(&buf, "search_response.html", data); err != nil {
-		return "", err
+		return "", markup, err
 	}
-	return buf.String(), nil
+	return buf.String(), markup, nil
 }
 
 // Вспомогательная отправка Rich Message
-func (b *Bot) sendRichMessage(chatID int64, html string) {
+func (b *Bot) sendRichMessage(chatID int64, html string, markup tgbotapi.InlineKeyboardMarkup) {
 	type inputRichMessage struct {
 		HTML string `json:"html"`
 	}
 	richMsgBytes, _ := json.Marshal(inputRichMessage{HTML: html})
+	markupBytes, _ := json.Marshal(markup)
 
 	params := tgbotapi.Params{
 		"chat_id":      strconv.FormatInt(chatID, 10),
 		"rich_message": string(richMsgBytes),
+		"reply_markup": string(markupBytes), // Прикрепляем клавиатуру
 	}
 
 	if _, err := b.api.MakeRequest("sendRichMessage", params); err != nil {
-		log.Printf("Ошибка отправки Rich Message: %v", err)
+		log.Printf("Ошибка отправки: %v", err)
 	}
 }
 
 // Редактирование существующего Rich Message (при перелистывании страниц)
-func (b *Bot) editRichMessage(chatID int64, msgID int, html string) {
+func (b *Bot) editRichMessage(chatID int64, msgID int, html string, markup tgbotapi.InlineKeyboardMarkup) {
 	type inputRichMessage struct {
 		HTML string `json:"html"`
 	}
 	richMsgBytes, _ := json.Marshal(inputRichMessage{HTML: html})
+	markupBytes, _ := json.Marshal(markup)
 
 	params := tgbotapi.Params{
 		"chat_id":      strconv.FormatInt(chatID, 10),
 		"message_id":   strconv.Itoa(msgID),
 		"rich_message": string(richMsgBytes),
+		"reply_markup": string(markupBytes),
 	}
 
 	// Обновляем сообщение (API Telegram позволяет передавать rich_message в editMessageText)

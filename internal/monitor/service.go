@@ -130,46 +130,52 @@ func (s *Service) runWorker(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Minute)
 	defer ticker.Stop()
 
+	s.runWorkerIteration(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			oldSubs, err := s.repo.GetOldSubscriptions(ctx)
+			s.runWorkerIteration(ctx)
+		}
+	}
+}
+
+func (s *Service) runWorkerIteration(ctx context.Context) {
+	oldSubs, err := s.repo.GetOldSubscriptions(ctx)
+	if err != nil {
+		log.Printf("Ошибка при получении старых подписок: %v", err)
+		return
+	}
+	if len(oldSubs) > 0 {
+		for _, sub := range oldSubs {
+			flight, err := s.repo.GetFlightByUID(ctx, sub.ActiveUID)
 			if err != nil {
-				log.Printf("Ошибка при получении старых подписок: %v", err)
+				log.Printf("Ошибка при получении рейса для %s: %v", sub.FlightCode, err)
 				continue
 			}
-			if len(oldSubs) > 0 {
-				for _, sub := range oldSubs {
-					flight, err := s.repo.GetFlightByUID(ctx, sub.ActiveUID)
-					if err != nil {
-						log.Printf("Ошибка при получении рейса для %s: %v", sub.FlightCode, err)
-						continue
-					}
-					nextFlight, err := s.repo.GetNextFlight(ctx, sub.FlightCode, flight.SchedTime)
+			nextFlight, err := s.repo.GetNextFlight(ctx, sub.FlightCode, flight.SchedTime)
 
-					if err != nil {
-						log.Printf("Ошибка при получении следующего рейса для %s: %v", sub.FlightCode, err)
-						continue
-					} else if nextFlight == nil {
-						continue
-					}
-
-					if err := s.repo.SwitchSubscriptionUID(ctx, sub.ChatID, sub.FlightCode, nextFlight.UID); err != nil {
-						log.Printf("Ошибка при переключении UID подписки для %s: %v", fmt.Sprint(sub.ChatID), err)
-						continue
-					} else if s.bot != nil {
-						s.bot.SendShiftAlert(sub.ChatID, sub.FlightCode, *nextFlight)
-					}
-				}
+			if err != nil {
+				log.Printf("Ошибка при получении следующего рейса для %s: %v", sub.FlightCode, err)
+				continue
+			} else if nextFlight == nil {
+				continue
 			}
 
-			if deleted, err := s.repo.DeleteOldFlights(ctx); err == nil && deleted > 0 {
-				log.Printf("Воркер очистки: удалено %d старых рейсов", deleted)
-			} else if err != nil {
-				log.Printf("Воркер очистки: ошибка при удалении старых рейсов: %v", err)
+			if err := s.repo.SwitchSubscriptionUID(ctx, sub.ChatID, sub.FlightCode, nextFlight.UID); err != nil {
+				log.Printf("Ошибка при переключении UID подписки для %s: %v", fmt.Sprint(sub.ChatID), err)
+				continue
+			} else if s.bot != nil {
+				s.bot.SendShiftAlert(sub.ChatID, sub.FlightCode, *nextFlight)
 			}
 		}
+	}
+
+	if deleted, err := s.repo.DeleteOldFlights(ctx); err == nil && deleted > 0 {
+		log.Printf("Воркер очистки: удалено %d старых рейсов", deleted)
+	} else if err != nil {
+		log.Printf("Воркер очистки: ошибка при удалении старых рейсов: %v", err)
 	}
 }

@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -29,14 +31,21 @@ func getEnv(key, fallback string) string {
 }
 
 func main() {
-	logFile, err := os.OpenFile("tracker.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	logDir := "logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Println(ui.ColorRed, "Не удалось создать каталог логов:", err, ui.ColorReset)
+		os.Exit(1)
+	}
+
+	logPath := filepath.Join(logDir, "tracker-"+time.Now().Format("20060102-150405")+".log")
+	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println(ui.ColorRed, "Не удалось открыть файл логов:", err, ui.ColorReset)
 		os.Exit(1)
 	}
 	defer logFile.Close()
 
-	log.SetOutput(logFile)
+	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
 	log.SetFlags(log.Ldate | log.Ltime)
 
 	log.Println("=== ЗАПУСК ТРЕКЕРА ===")
@@ -44,7 +53,6 @@ func main() {
 	envProvider := getEnv("PROVIDER", "svo")
 	envToken := getEnv("TELEGRAM_BOT_TOKEN", getEnv("TG_TOKEN", ""))
 
-	// 2. Инициализируем флаги (дефолты берутся из ENV)
 	providerParam := flag.String("provider", envProvider, "Провайдер/аэропорт (или env: PROVIDER)")
 	tgToken := flag.String("token", envToken, "Telegram Bot Token (или env: TELEGRAM_BOT_TOKEN)")
 
@@ -55,7 +63,7 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println(ui.ColorCyan + ui.ColorBold + "✈️  Запуск трекера. Логи пишутся в tracker.log" + ui.ColorReset)
+	fmt.Println(ui.ColorCyan + ui.ColorBold + "✈️  Запуск трекера. Лог: " + logPath + ui.ColorReset)
 
 	p, err := provider.New(*providerParam)
 	if err != nil {

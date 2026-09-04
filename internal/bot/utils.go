@@ -48,3 +48,7 @@ func GetSubscribeURL(botUsername, flightCode string) string {
 func GetUnsubscribeURL(botUsername, flightCode string) string {
 	return strings.ReplaceAll(fmt.Sprintf(unsubscribeCommandURL, botUsername, flightCode), " ", "%20")
 }
+
+func GetInfoURL(botUsername, flightCode string) string {
+	return strings.ReplaceAll(fmt.Sprintf(infoCommandURL, botUsername, flightCode), " ", "%20")
+}

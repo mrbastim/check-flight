@@ -53,6 +53,35 @@ func (b *Bot) flightSearchPage(ctx context.Context, token, direction string, pag
 	return text, tgbotapi.NewInlineKeyboardMarkup(rows...), nil
 }
 
+// Генерация стандартной Telegram-клавиатуры под Rich-сообщением
+func (b *Bot) buildSearchKeyboard(token, direction string, page, pageCount int) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	// Ряд 1: Фильтры
+	filterRow := []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(filterLabel("all", direction, "Все"), fmt.Sprintf("fl:%s:all:%d", token, page)),
+		tgbotapi.NewInlineKeyboardButtonData(filterLabel("dep", direction, "Вылеты"), fmt.Sprintf("fl:%s:dep:%d", token, page)),
+		tgbotapi.NewInlineKeyboardButtonData(filterLabel("arr", direction, "Прилеты"), fmt.Sprintf("fl:%s:arr:%d", token, page)),
+	}
+	rows = append(rows, filterRow)
+
+	// Ряд 2: Навигация + Кнопка "Обновить"
+	var navRow []tgbotapi.InlineKeyboardButton
+
+	if page > 0 {
+		navRow = append(navRow, tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", fmt.Sprintf("pg:%s:%s:%d", token, direction, page-1)))
+	}
+
+	navRow = append(navRow, tgbotapi.NewInlineKeyboardButtonData("🔄 Обновить", fmt.Sprintf("ref:%s:%s:%d", token, direction, page)))
+
+	if page+1 < pageCount {
+		navRow = append(navRow, tgbotapi.NewInlineKeyboardButtonData("Вперед ➡️", fmt.Sprintf("pg:%s:%s:%d", token, direction, page+1)))
+	}
+	rows = append(rows, navRow)
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
 func flightButton(flight model.Flight) tgbotapi.InlineKeyboardButton {
 	t, _ := time.Parse(time.RFC3339, flight.SchedTime)
 	icon := "🛫"

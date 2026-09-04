@@ -51,14 +51,17 @@ type searchTemplateData struct {
 }
 
 type flightRenderData struct {
-	Icon     string
-	Provider string
-	Dest     string
-	Code     string
-	Arrow    string
-	Date     string
-	Time     string
-	UID      string
+	Icon        string
+	Provider    string
+	Dest        string
+	Code        string
+	Arrow       string
+	Date        string
+	Time        string
+	UID         string
+	Info        string
+	ActionURL   string
+	ExternalURL string
 }
 
 const (
@@ -271,7 +274,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 
 // Обработка нажатия на кнопку (выбор даты)
 func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
-	if strings.HasPrefix(cb.Data, "fl:") || strings.HasPrefix(cb.Data, "pg:") {
+	if strings.HasPrefix(cb.Data, "fl:") || strings.HasPrefix(cb.Data, "pg:") || strings.HasPrefix(cb.Data, "ref:") {
 		parts := strings.Split(cb.Data, ":")
 		if len(parts) != 4 {
 			return
@@ -280,12 +283,13 @@ func (b *Bot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 		if err != nil {
 			return
 		}
-		htmlData, err := b.buildRichSearchPage(ctx, parts[1], parts[2], page)
+		htmlData, markup, err := b.buildRichSearchPage(ctx, parts[1], parts[2], page)
 		if err != nil {
 			b.answerCallback(cb.ID, "Результаты поиска устарели")
+			log.Printf("Ошибка при построении Rich Message %s: %v", parts[1], err)
 			return
 		}
-		b.editRichMessage(cb.Message.Chat.ID, cb.Message.MessageID, htmlData)
+		b.editRichMessage(cb.Message.Chat.ID, cb.Message.MessageID, htmlData, markup)
 		b.answerCallback(cb.ID, "")
 		return
 	}
@@ -482,13 +486,14 @@ func (b *Bot) searchCity(token string) (string, bool) {
 // Отправка нового поиска
 func (b *Bot) sendFlightSearch(ctx context.Context, chatID int64, city string) {
 	token := b.newSearch(city)
-	htmlData, err := b.buildRichSearchPage(ctx, token, "all", 0)
+	htmlData, markup, err := b.buildRichSearchPage(ctx, token, "all", 0)
 	if err != nil {
 		b.send(chatID, "❌ Ошибка при поиске рейсов или поиск устарел.")
+		log.Printf("Ошибка при построении Rich Message для поиска рейсов по городу %s: %v", city, err)
 		return
 	}
 
-	b.sendRichMessage(chatID, htmlData)
+	b.sendRichMessage(chatID, htmlData, markup)
 }
 
 func (b *Bot) sendSearchTable(chatID int64, city string, flights []model.Flight) {
